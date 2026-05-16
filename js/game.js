@@ -92,14 +92,14 @@ function initScene() {
   const shadows = new BABYLON.ShadowGenerator(2048, dir);
   shadows.useBlurExponentialShadowMap = true;
 
-  // Follow camera – low angle like Mario Kart
+  // Follow camera – low angle like Mario Kart, high enough to see over furniture
   camera = new BABYLON.FollowCamera('cam', new BABYLON.Vector3(0, 4, -14), scene);
-  camera.radius = 11;
-  camera.heightOffset = 3.5;
+  camera.radius = 13;
+  camera.heightOffset = 4.5;
   camera.rotationOffset = 180;
   camera.cameraAcceleration = 0.06;
   camera.maxCameraSpeed = 22;
-  camera.fov = 1.1;
+  camera.fov = 1.05;
 
   mmCtx = document.getElementById('mm').getContext('2d');
 
@@ -605,13 +605,24 @@ function startFinishLine(cx, cz, angle, scene) {
   }
 }
 
-// ── Fluorescent ceiling light ─────────────────────────────────────────────────
-function fluorescentLight(x,z,scene) {
-  const fix = BABYLON.MeshBuilder.CreateBox('fl'+x+z,{width:0.18,height:0.04,depth:1.4},scene);
-  fix.position.set(x, 3.18, z);
-  const mat = pbr(1,1,0.9,0,0.05,scene); fix.material=mat;
-  const pl = new BABYLON.PointLight('pl'+x+z, new BABYLON.Vector3(x,3,z), scene);
-  pl.intensity=0.55; pl.range=9;
+// ── Fluorescent ceiling light (hangs high, never blocks camera) ──────────────
+function fluorescentLight(x,z,scene,h) {
+  const ch = h || 6.5;
+  // Recessed housing
+  const housing = BABYLON.MeshBuilder.CreateBox('flh'+x+z,{width:0.55,height:0.06,depth:1.5},scene);
+  housing.position.set(x, ch, z);
+  housing.material = pbr(0.3,0.3,0.3,0.5,0.5,scene);
+  // Tube glow
+  const tube = BABYLON.MeshBuilder.CreateBox('flt'+x+z,{width:0.14,height:0.04,depth:1.38},scene);
+  tube.position.set(x, ch-0.02, z);
+  tube.material = pbr(1,1,0.92,0,0.02,scene);
+  // Hanging wire
+  const wire = BABYLON.MeshBuilder.CreateCylinder('flw'+x+z,{height:0.5,diameter:0.015},scene);
+  wire.position.set(x, ch+0.28, z);
+  wire.material = pbr(0.1,0.1,0.1,0.5,0.5,scene);
+  // Point light
+  const pl = new BABYLON.PointLight('pl'+x+z, new BABYLON.Vector3(x,ch-0.3,z), scene);
+  pl.intensity=0.65; pl.range=11;
   pl.diffuse = new BABYLON.Color3(1,0.97,0.88);
 }
 
@@ -678,6 +689,160 @@ function waterCooler(x,z,scene) {
   const bottle=BABYLON.MeshBuilder.CreateCylinder('wb'+x,{height:0.55,diameter:0.28},scene); bottle.position.set(x,1.28,z); bottle.material=pbr(0.6,0.82,0.9,0.05,0.15,scene);
 }
 
+// ── Printer / Copier machine ──────────────────────────────────────────────────
+function printer(x,z,ry,scene) {
+  const g=new BABYLON.TransformNode('prn'+x+z,scene); g.position.set(x,0,z); g.rotation.y=ry;
+  const body=BABYLON.MeshBuilder.CreateBox('pb',{width:0.7,height:0.55,depth:0.55},scene); body.parent=g; body.position.y=0.5; body.material=pbr(0.88,0.88,0.86,0.1,0.5,scene);
+  const top=BABYLON.MeshBuilder.CreateBox('pt',{width:0.72,height:0.05,depth:0.57},scene); top.parent=g; top.position.y=0.8; top.material=pbr(0.3,0.3,0.3,0.3,0.5,scene);
+  const tray=BABYLON.MeshBuilder.CreateBox('ptr',{width:0.5,height:0.02,depth:0.38},scene); tray.parent=g; tray.position.set(0,0.35,0.28); tray.rotation.x=-0.15; tray.material=pbr(0.5,0.5,0.5,0.2,0.6,scene);
+  const panel=BABYLON.MeshBuilder.CreateBox('pnl',{width:0.18,height:0.12,depth:0.03},scene); panel.parent=g; panel.position.set(0.22,0.65,-0.28); panel.material=pbr(0.05,0.25,0.45,0,0.1,scene);
+}
+
+// ── Bookshelf ─────────────────────────────────────────────────────────────────
+function bookshelf(x,z,ry,scene) {
+  const g=new BABYLON.TransformNode('bs'+x+z,scene); g.position.set(x,0,z); g.rotation.y=ry;
+  const wood=pbr(0.5,0.38,0.25,0.05,0.7,scene);
+  // Frame
+  const back=BABYLON.MeshBuilder.CreateBox('bk',{width:1.5,height:2.1,depth:0.06},scene); back.parent=g; back.position.y=1.05; back.material=wood;
+  [-0.72,0.72].forEach((px,i)=>{
+    const side=BABYLON.MeshBuilder.CreateBox('bs'+i,{width:0.06,height:2.1,depth:0.36},scene); side.parent=g; side.position.set(px,1.05,0.15); side.material=wood;
+  });
+  [0,0.52,1.04,1.58,2.1].forEach((py,i)=>{
+    const shelf=BABYLON.MeshBuilder.CreateBox('sh'+i,{width:1.44,height:0.04,depth:0.36},scene); shelf.parent=g; shelf.position.set(0,py,0.15); shelf.material=wood;
+  });
+  // Books (colourful spines)
+  const bookColors=[[0.7,0.15,0.15],[0.15,0.4,0.7],[0.2,0.6,0.25],[0.65,0.55,0.12],[0.55,0.18,0.55],[0.15,0.5,0.5]];
+  for (let row=0; row<4; row++) {
+    let bx=-0.62;
+    for (let b=0; b<7; b++) {
+      const bw=0.06+Math.random()*0.06, bh=0.38+Math.random()*0.1;
+      const bk=BABYLON.MeshBuilder.CreateBox('bk'+row+b,{width:bw,height:bh,depth:0.28},scene);
+      bk.parent=g; bk.position.set(bx+bw/2, row*0.52+bh/2+0.06, 0.04);
+      bk.material=pbr(...bookColors[b%bookColors.length],0,0.9,scene);
+      bx+=bw+0.01;
+    }
+  }
+}
+
+// ── Break-room coffee station ─────────────────────────────────────────────────
+function coffeeStation(x,z,ry,scene) {
+  const g=new BABYLON.TransformNode('cof'+x+z,scene); g.position.set(x,0,z); g.rotation.y=ry;
+  const wood=pbr(0.5,0.38,0.25,0.05,0.7,scene);
+  const black=pbr(0.08,0.08,0.09,0.4,0.5,scene);
+  // Counter
+  const counter=BABYLON.MeshBuilder.CreateBox('cc',{width:1.6,height:0.86,depth:0.6},scene); counter.parent=g; counter.position.y=0.43; counter.material=wood;
+  const top=BABYLON.MeshBuilder.CreateBox('ct',{width:1.62,height:0.04,depth:0.62},scene); top.parent=g; top.position.y=0.88; top.material=pbr(0.72,0.68,0.62,0.15,0.3,scene);
+  // Coffee machine
+  const cm=BABYLON.MeshBuilder.CreateBox('cm',{width:0.3,height:0.44,depth:0.28},scene); cm.parent=g; cm.position.set(-0.5,1.1,-0.12); cm.material=black;
+  const cmtop=BABYLON.MeshBuilder.CreateBox('cmt',{width:0.28,height:0.12,depth:0.26},scene); cmtop.parent=g; cmtop.position.set(-0.5,1.34,-0.12); cmtop.material=pbr(0.55,0.22,0.08,0.1,0.6,scene);
+  // Cup
+  const cup=BABYLON.MeshBuilder.CreateCylinder('cup',{height:0.1,diameter:0.07},scene); cup.parent=g; cup.position.set(-0.5,0.95,-0.15); cup.material=pbr(0.95,0.95,0.95,0,0.8,scene);
+  // Microwave
+  const mw=BABYLON.MeshBuilder.CreateBox('mw',{width:0.52,height:0.32,depth:0.34},scene); mw.parent=g; mw.position.set(0.4,1.08,-0.1); mw.material=pbr(0.85,0.85,0.83,0.1,0.5,scene);
+  const mwdoor=BABYLON.MeshBuilder.CreateBox('mwd',{width:0.36,height:0.28,depth:0.02},scene); mwdoor.parent=g; mwdoor.position.set(0.3,1.08,-0.27); mwdoor.material=pbr(0.15,0.45,0.6,0,0.08,scene);
+  // Fridge underneath
+  const fridge=BABYLON.MeshBuilder.CreateBox('fr',{width:0.58,height:0.82,depth:0.56},scene); fridge.parent=g; fridge.position.set(0.55,0.41,0.02); fridge.material=pbr(0.88,0.88,0.86,0.3,0.4,scene);
+  const fhandle=BABYLON.MeshBuilder.CreateBox('frh',{width:0.04,height:0.28,depth:0.04},scene); fhandle.parent=g; fhandle.position.set(0.27,0.6,-0.29); fhandle.material=pbr(0.6,0.6,0.6,0.8,0.2,scene);
+}
+
+// ── Motivational poster on wall ───────────────────────────────────────────────
+function wallPoster(x,y,z,ry,w,h,col,scene) {
+  const frame=BABYLON.MeshBuilder.CreateBox('pf'+x+z,{width:w+0.06,height:h+0.06,depth:0.04},scene);
+  frame.position.set(x,y,z); frame.rotation.y=ry; frame.material=pbr(0.12,0.12,0.12,0.3,0.6,scene);
+  const print=BABYLON.MeshBuilder.CreateBox('pp'+x+z,{width:w,height:h,depth:0.03},scene);
+  print.position.set(x,y,z+(ry===0?0.02:-0.02)); print.rotation.y=ry; print.material=pbr(...col,0,0.6,scene);
+}
+
+// ── Wall clock ────────────────────────────────────────────────────────────────
+function wallClock(x,y,z,ry,scene) {
+  const face=BABYLON.MeshBuilder.CreateCylinder('clf'+x,{height:0.04,diameter:0.38},scene);
+  face.position.set(x,y,z); face.rotation.x=Math.PI/2; face.rotation.y=ry; face.material=pbr(0.96,0.96,0.94,0,0.5,scene);
+  const rim=BABYLON.MeshBuilder.CreateCylinder('clr'+x,{height:0.05,diameter:0.42},scene);
+  rim.position.set(x,y,z); rim.rotation.x=Math.PI/2; rim.rotation.y=ry; rim.material=pbr(0.15,0.15,0.15,0.5,0.4,scene);
+  // Hour hand
+  const hr=BABYLON.MeshBuilder.CreateBox('clh'+x,{width:0.03,height:0.12,depth:0.02},scene);
+  hr.position.set(x+Math.sin(ry)*0.02,y+0.04,z-Math.cos(ry)*0.02); hr.rotation.y=ry; hr.material=pbr(0.1,0.1,0.1,0,0.8,scene);
+  // Minute hand
+  const mn=BABYLON.MeshBuilder.CreateBox('clm'+x,{width:0.02,height:0.16,depth:0.02},scene);
+  mn.position.set(x+Math.sin(ry)*0.02,y+0.04,z-Math.cos(ry)*0.02); mn.rotation.y=ry+0.8; mn.material=pbr(0.1,0.1,0.1,0,0.8,scene);
+}
+
+// ── Notice / cork board ────────────────────────────────────────────────────────
+function noticeboard(x,y,z,ry,scene) {
+  const frame=BABYLON.MeshBuilder.CreateBox('nbf'+x,{width:1.22,height:0.82,depth:0.05},scene);
+  frame.position.set(x,y,z); frame.rotation.y=ry; frame.material=pbr(0.4,0.28,0.15,0.1,0.8,scene);
+  const board=BABYLON.MeshBuilder.CreateBox('nbb'+x,{width:1.1,height:0.7,depth:0.04},scene);
+  board.position.set(x,y,z+(ry===0?0.03:-0.03)); board.rotation.y=ry; board.material=pbr(0.62,0.44,0.26,0,0.97,scene);
+  // Pinned notes (small coloured squares)
+  const noteC=[[0.9,0.9,0.2],[0.2,0.7,0.9],[0.9,0.4,0.2],[0.7,0.9,0.3]];
+  for (let i=0;i<6;i++) {
+    const nx=x+(Math.random()-0.5)*0.8, ny=y+(Math.random()-0.5)*0.5;
+    const note=BABYLON.MeshBuilder.CreateBox('nbn'+x+i,{width:0.18,height:0.14,depth:0.02},scene);
+    note.position.set(nx,ny,z+(ry===0?0.06:-0.06)); note.rotation.y=ry; note.rotation.z=(Math.random()-0.5)*0.3;
+    note.material=pbr(...noteC[i%noteC.length],0,0.8,scene);
+  }
+}
+
+// ── Fire extinguisher ────────────────────────────────────────────────────────
+function fireExt(x,z,scene) {
+  const body=BABYLON.MeshBuilder.CreateCylinder('fe'+x+z,{height:0.52,diameter:0.16},scene);
+  body.position.set(x,0.26,z); body.material=pbr(0.8,0.1,0.08,0.2,0.5,scene);
+  const top=BABYLON.MeshBuilder.CreateCylinder('fet'+x+z,{height:0.06,diameter:0.18},scene);
+  top.position.set(x,0.55,z); top.material=pbr(0.6,0.6,0.6,0.8,0.3,scene);
+  const nozzle=BABYLON.MeshBuilder.CreateCylinder('fen'+x+z,{height:0.14,diameter:0.04},scene);
+  nozzle.position.set(x+0.08,0.62,z); nozzle.rotation.z=Math.PI/4; nozzle.material=pbr(0.15,0.15,0.15,0.5,0.4,scene);
+}
+
+// ── Trash bin ────────────────────────────────────────────────────────────────
+function trashBin(x,z,scene) {
+  const bin=BABYLON.MeshBuilder.CreateCylinder('tb'+x+z,{height:0.4,diameterTop:0.28,diameterBottom:0.22},scene);
+  bin.position.set(x,0.2,z); bin.material=pbr(0.25,0.25,0.25,0.2,0.7,scene);
+  const lid=BABYLON.MeshBuilder.CreateCylinder('tbl'+x+z,{height:0.04,diameter:0.3},scene);
+  lid.position.set(x,0.42,z); lid.material=pbr(0.2,0.2,0.2,0.3,0.6,scene);
+}
+
+// ── Reception desk ────────────────────────────────────────────────────────────
+function receptionDesk(x,z,ry,scene) {
+  const g=new BABYLON.TransformNode('rec'+x+z,scene); g.position.set(x,0,z); g.rotation.y=ry;
+  const wood=pbr(0.45,0.35,0.25,0.05,0.6,scene);
+  const top2=pbr(0.82,0.8,0.76,0.2,0.25,scene);
+  // Main curved shape faked with 3 boxes
+  const front=BABYLON.MeshBuilder.CreateBox('rf',{width:2.8,height:1.05,depth:0.18},scene); front.parent=g; front.position.set(0,0.52,-0.5); front.material=wood;
+  const leftW=BABYLON.MeshBuilder.CreateBox('rl',{width:0.18,height:1.05,depth:1.0},scene); leftW.parent=g; leftW.position.set(-1.31,0.52,0); leftW.material=wood;
+  const rightW=BABYLON.MeshBuilder.CreateBox('rr',{width:0.18,height:1.05,depth:1.0},scene); rightW.parent=g; rightW.position.set(1.31,0.52,0); rightW.material=wood;
+  const counter=BABYLON.MeshBuilder.CreateBox('rc',{width:2.8,height:0.06,depth:1.1},scene); counter.parent=g; counter.position.set(0,1.08,0); counter.material=top2;
+  // Monitor on desk
+  const mon=BABYLON.MeshBuilder.CreateBox('rm',{width:0.55,height:0.38,depth:0.04},scene); mon.parent=g; mon.position.set(-0.7,1.46,-0.1); mon.material=pbr(0.06,0.06,0.07,0.5,0.4,scene);
+  const scr=BABYLON.MeshBuilder.CreateBox('rs',{width:0.48,height:0.32,depth:0.02},scene); scr.parent=g; scr.position.set(-0.7,1.46,-0.09); scr.material=pbr(0.05,0.3,0.5,0,0.08,scene);
+  // Phone
+  const phone=BABYLON.MeshBuilder.CreateBox('rph',{width:0.18,height:0.04,depth:0.26},scene); phone.parent=g; phone.position.set(0.5,1.12,0.1); phone.material=pbr(0.1,0.1,0.12,0.3,0.5,scene);
+}
+
+// ── Coat rack ────────────────────────────────────────────────────────────────
+function coatRack(x,z,scene) {
+  const pole=BABYLON.MeshBuilder.CreateCylinder('cr'+x+z,{height:1.7,diameter:0.04},scene);
+  pole.position.set(x,0.85,z); pole.material=pbr(0.4,0.3,0.2,0.2,0.7,scene);
+  const base=BABYLON.MeshBuilder.CreateCylinder('crb'+x+z,{height:0.05,diameter:0.55},scene);
+  base.position.set(x,0.025,z); base.material=pbr(0.3,0.22,0.15,0.1,0.8,scene);
+  // Hooks
+  for (let i=0;i<4;i++) {
+    const ha=i/4*Math.PI*2;
+    const hook=BABYLON.MeshBuilder.CreateBox('crh'+x+i,{width:0.04,height:0.04,depth:0.14},scene);
+    hook.position.set(x+Math.sin(ha)*0.06,1.62,z+Math.cos(ha)*0.06); hook.rotation.y=ha; hook.material=pbr(0.6,0.5,0.3,0.4,0.5,scene);
+  }
+  // A jacket hanging
+  const jacket=BABYLON.MeshBuilder.CreateBox('crj'+x,{width:0.28,height:0.38,depth:0.05},scene);
+  jacket.position.set(x+0.06,1.38,z+0.06); jacket.rotation.y=0.5; jacket.material=pbr(0.15,0.2,0.45,0,0.9,scene);
+}
+
+// ── Vending machine ───────────────────────────────────────────────────────────
+function vendingMachine(x,z,ry,scene) {
+  const g=new BABYLON.TransformNode('vm'+x+z,scene); g.position.set(x,0,z); g.rotation.y=ry;
+  const body=BABYLON.MeshBuilder.CreateBox('vmb',{width:0.72,height:1.75,depth:0.55},scene); body.parent=g; body.position.y=0.875; body.material=pbr(0.12,0.38,0.18,0.1,0.5,scene);
+  const glass=BABYLON.MeshBuilder.CreateBox('vmg',{width:0.54,height:1.0,depth:0.04},scene); glass.parent=g; glass.position.set(0,1.08,-0.28); glass.material=pbr(0.55,0.75,0.85,0.05,0.06,scene);
+  const panel=BABYLON.MeshBuilder.CreateBox('vmp',{width:0.24,height:0.36,depth:0.04},scene); glass.parent=g; panel.parent=g; panel.position.set(0,0.5,-0.28); panel.material=pbr(0.2,0.2,0.22,0.3,0.4,scene);
+}
+
 // ── Office floor tiles ────────────────────────────────────────────────────────
 function officeTiles(w,d,cx,cz,scene,col) {
   const mat=pbr(...col,0.05,0.35,scene);
@@ -686,39 +851,55 @@ function officeTiles(w,d,cx,cz,scene,col) {
   return floor;
 }
 
-// ── Suspended ceiling ─────────────────────────────────────────────────────────
-function suspendedCeiling(w,d,cx,cz,h,scene) {
-  const ceil=BABYLON.MeshBuilder.CreateBox('ceil',{width:w,height:0.15,depth:d},scene);
-  ceil.position.set(cx,h+0.075,cz);
-  ceil.material=pbr(0.94,0.94,0.92,0,0.95,scene);
-  // Grid lines
-  for (let x=cx-w/2; x<cx+w/2; x+=2) {
-    const gl=BABYLON.MeshBuilder.CreateBox('cgl'+x,{width:0.05,height:0.1,depth:d},scene);
-    gl.position.set(x,h+0.04,cz); gl.material=pbr(0.75,0.75,0.75,0.5,0.6,scene);
+// ── Suspended ceiling – always at 7 units, never clips camera ────────────────
+function suspendedCeiling(w,d,cx,cz,scene) {
+  const h = 7.0;
+  const ceilMat = pbr(0.93,0.93,0.91,0,0.97,scene);
+  const gridMat = pbr(0.72,0.72,0.70,0.3,0.65,scene);
+  const ceil=BABYLON.MeshBuilder.CreateBox('ceil',{width:w,height:0.18,depth:d},scene);
+  ceil.position.set(cx,h,cz); ceil.material=ceilMat;
+  // 2x2 grid of tiles
+  for (let x=cx-w/2+1; x<cx+w/2; x+=2) {
+    const gl=BABYLON.MeshBuilder.CreateBox('cglx'+x,{width:0.04,height:0.14,depth:d},scene);
+    gl.position.set(x,h-0.04,cz); gl.material=gridMat;
   }
-  for (let z=cz-d/2; z<cz+d/2; z+=2) {
-    const gl=BABYLON.MeshBuilder.CreateBox('cgz'+z,{width:w,height:0.1,depth:0.05},scene);
-    gl.position.set(cx,h+0.04,z); gl.material=pbr(0.75,0.75,0.75,0.5,0.6,scene);
+  for (let z=cz-d/2+1; z<cz+d/2; z+=2) {
+    const gl=BABYLON.MeshBuilder.CreateBox('cglz'+z,{width:w,height:0.14,depth:0.04},scene);
+    gl.position.set(cx,h-0.04,z); gl.material=gridMat;
+  }
+  // Sprinkler heads
+  for (let x=cx-w/2+3; x<cx+w/2; x+=6) {
+    for (let z=cz-d/2+3; z<cz+d/2; z+=6) {
+      const sp=BABYLON.MeshBuilder.CreateCylinder('sp'+x+z,{height:0.06,diameter:0.08},scene);
+      sp.position.set(x,h-0.12,z); sp.material=pbr(0.7,0.1,0.1,0.5,0.4,scene);
+    }
   }
 }
 
-// ── Outer walls ───────────────────────────────────────────────────────────────
-function outerWalls(minX,maxX,minZ,maxZ,h,scene,wallMat,windowMat) {
-  const W=maxX-minX, D=maxZ-minZ;
-  // N/S walls with windows
+// ── Outer walls at full height (7 units) with windows ────────────────────────
+function outerWalls(minX,maxX,minZ,maxZ,scene,wallMat,windowMat) {
+  const h=7.0, W=maxX-minX, D=maxZ-minZ;
+  // N/S solid walls
   [[0,minZ,W],[0,maxZ,W]].forEach(([x,z,w],si)=>{
-    const wall=BABYLON.MeshBuilder.CreateBox('ow'+si,{width:w,height:h,depth:0.3},scene);
+    const wall=BABYLON.MeshBuilder.CreateBox('ow'+si,{width:w,height:h,depth:0.35},scene);
     wall.position.set(x,h/2,z); wall.material=wallMat; wall.receiveShadows=true;
-    // Window panels
-    for (let wx=minX+3; wx<maxX-2; wx+=5) {
-      const win=BABYLON.MeshBuilder.CreateBox('win'+si+wx,{width:3,height:h*0.55,depth:0.05},scene);
-      win.position.set(wx,h*0.55,z+(si===0?0.16:-0.16)); win.material=windowMat;
+    // Full-height window columns (floor-to-ceiling)
+    for (let wx=minX+4; wx<maxX-3; wx+=5) {
+      const win=BABYLON.MeshBuilder.CreateBox('win'+si+wx,{width:3.2,height:h*0.7,depth:0.06},scene);
+      win.position.set(wx,h*0.55,z+(si===0?0.2:-0.2)); win.material=windowMat;
+      // Window frame
+      const wf=BABYLON.MeshBuilder.CreateBox('wf'+si+wx,{width:3.4,height:h*0.72,depth:0.08},scene);
+      wf.position.set(wx,h*0.55,z+(si===0?0.19:-0.19)); wf.material=pbr(0.75,0.72,0.68,0,0.8,scene);
     }
   });
   // E/W walls
   [[minX,0,D],[maxX,0,D]].forEach(([x,z,d],si)=>{
-    const wall=BABYLON.MeshBuilder.CreateBox('ow2'+si,{width:0.3,height:h,depth:d},scene);
+    const wall=BABYLON.MeshBuilder.CreateBox('ow2'+si,{width:0.35,height:h,depth:d},scene);
     wall.position.set(x,h/2,z); wall.material=wallMat;
+    for (let wz=minZ+4; wz<maxZ-3; wz+=6) {
+      const win=BABYLON.MeshBuilder.CreateBox('winE'+si+wz,{width:0.06,height:h*0.65,depth:3.0},scene);
+      win.position.set(x+(si===0?0.2:-0.2),h*0.52,wz); win.material=windowMat;
+    }
   });
 }
 
@@ -738,24 +919,23 @@ function buildCubicleCanyon(scene, shadows) {
   scene.fogColor = new BABYLON.Color3(0.87,0.9,0.88);
   scene.clearColor= new BABYLON.Color4(0.87,0.9,0.88,1);
 
-  const wallMat= pbr(0.9,0.9,0.88,0,0.85,scene);
-  const winMat = pbr(0.55,0.75,0.88,0.05,0.08,scene);
+  const wallMat= pbr(0.92,0.91,0.88,0,0.85,scene);
+  const winMat = pbr(0.55,0.75,0.88,0.05,0.06,scene);
   const carpMat= pbr(0.42,0.46,0.5,0,0.99,scene);
 
-  // Room
   officeTiles(80,84, 0,0, scene,[0.88,0.88,0.86]);
-  suspendedCeiling(80,84, 0,0, 3.2,scene);
-  outerWalls(-40,40,-42,42, 3.2,scene,wallMat,winMat);
+  suspendedCeiling(80,84, 0,0, scene);
+  outerWalls(-40,40,-42,42, scene,wallMat,winMat);
   baseboard(-40,40,-42,42,scene,pbr(0.72,0.68,0.6,0,0.8,scene));
 
-  // Carpet runner in office areas
-  const carp=BABYLON.MeshBuilder.CreateBox('carp',{width:10,height:0.01,depth:84},scene);
+  // Carpet strips between cubicle rows
+  const carp=BABYLON.MeshBuilder.CreateBox('carp',{width:8,height:0.01,depth:84},scene);
   carp.position.set(0,0.01,0); carp.material=carpMat;
 
-  // Lights grid
-  for (let x=-24; x<=24; x+=12) for (let z=-36; z<=36; z+=8) fluorescentLight(x,z,scene);
+  // Lights at 6.5 height
+  for (let x=-28; x<=28; x+=10) for (let z=-38; z<=38; z+=8) fluorescentLight(x,z,scene,6.5);
 
-  // ── Track (Mario-Kart loop around cubicle rows) ──
+  // Track
   const rawPts = [
     new BABYLON.Vector3(0,0,-36),
     new BABYLON.Vector3(-28,0,-30),
@@ -770,39 +950,70 @@ function buildCubicleCanyon(scene, shadows) {
   ];
   buildRoad(rawPts, 8, scene);
   startFinishLine(0,-36,0,scene);
-
-  // Checkpoints at each raw waypoint
   cpData = rawPts.map((p,i)=>({x:p.x,z:p.z,finish:i===0}));
 
-  // ── Office furniture (outside track) ──
-  // Left cubicle farm
+  // ── Left cubicle farm ──
   for (let row=0; row<3; row++) {
     for (let col=0; col<5; col++) {
-      const cx=-12-row*6, cz=-20+col*10;
+      const cx=-12-row*5.5, cz=-20+col*10;
       cubicleWall(cx+1,cz, 3.5, 0, scene);
       cubicleWall(cx,cz+1.75, 3.5, Math.PI/2, scene);
-      officeDesk(cx-0.5,cz, 0, scene);
+      officeDesk(cx-0.6,cz, 0, scene);
+      if (col%2===0) trashBin(cx-1.5,cz+1.5,scene);
     }
   }
-  // Right cubicle farm
+  // ── Right cubicle farm ──
   for (let row=0; row<3; row++) {
     for (let col=0; col<5; col++) {
-      const cx=12+row*6, cz=-20+col*10;
+      const cx=12+row*5.5, cz=-20+col*10;
       cubicleWall(cx-1,cz, 3.5, 0, scene);
       cubicleWall(cx,cz+1.75, 3.5, Math.PI/2, scene);
-      officeDesk(cx+0.5,cz, 0, scene);
+      officeDesk(cx+0.6,cz, Math.PI, scene);
+      if (col%3===0) cabinet(cx+1.5,cz-1,0,scene);
     }
   }
 
-  // Plants, cabinets, coolers dotted around
-  [[-36,-38],[36,-38],[-36,38],[36,38],[-36,0],[36,0]].forEach(([x,z])=>plant(x,z,scene));
-  [[-35,-25],[35,-25],[-35,25],[35,25]].forEach(([x,z])=>cabinet(x,z,0,scene));
-  [[-38,10],[38,-10]].forEach(([x,z])=>waterCooler(x,z,scene));
+  // Reception near start
+  receptionDesk(0,-38.5,0,scene);
+  coatRack(-4,-40,scene);
+  coatRack(4,-40,scene);
 
-  // Motivational poster on N wall
-  const poster=BABYLON.MeshBuilder.CreateBox('poster',{width:1.8,height:1.2,depth:0.03},scene);
-  poster.position.set(-8,1.8,-41.8);
-  poster.material=pbr(0.2,0.45,0.75,0,0.7,scene);
+  // Break room corner (NE)
+  coffeeStation(34,36,Math.PI/2,scene);
+  vendingMachine(36,30,-Math.PI/2,scene);
+  waterCooler(36,40,scene);
+  waterCooler(-36,40,scene);
+
+  // Bookshelves along centre wall
+  bookshelf(-2,-32,0,scene);
+  bookshelf(2,-32,Math.PI,scene);
+  bookshelf(-2,32,0,scene);
+  bookshelf(2,32,Math.PI,scene);
+
+  // Printers
+  printer(-8,-38,0,scene);
+  printer(8,-38,Math.PI,scene);
+  printer(-8,38,0,scene);
+
+  // Plants
+  [[-36,-40],[36,-40],[-36,40],[36,40],[-36,0],[36,0],[-36,-20],[36,20]].forEach(([x,z])=>plant(x,z,scene));
+
+  // Wall clocks & posters
+  wallClock(-39.7,4.2,-10,Math.PI/2,scene);
+  wallClock(39.7,4.2,10,-Math.PI/2,scene);
+  wallPoster(-25,3.5,-41.7,0, 1.4,0.9,[0.2,0.45,0.75],scene);
+  wallPoster(0,3.5,-41.7,0,  1.4,0.9,[0.6,0.18,0.18],scene);
+  wallPoster(25,3.5,-41.7,0, 1.4,0.9,[0.18,0.5,0.25],scene);
+  noticeboard(-15,3.2,-41.7,0,scene);
+  noticeboard(15,3.2,-41.7,0,scene);
+
+  // Fire extinguishers
+  [[-39,35],[-39,-35],[39,35],[39,-35]].forEach(([x,z])=>fireExt(x,z,scene));
+
+  // Filing cabinets clusters
+  [[-36,-28],[36,-28],[-36,28],[36,28]].forEach(([x,z])=>{
+    cabinet(x,z,0,scene); cabinet(x+0.6,z,0,scene);
+  });
 
   spawnRacers(scene, 0, -34, shadows);
 }
@@ -814,26 +1025,29 @@ function buildOpenOffice(scene, shadows) {
   scene.fogColor = new BABYLON.Color3(0.9,0.92,0.88);
   scene.clearColor= new BABYLON.Color4(0.9,0.92,0.88,1);
 
-  const conc  = pbr(0.52,0.52,0.5, 0,0.95,scene);
   const wallM = pbr(0.96,0.95,0.92,0,0.88,scene);
-  const glass = pbr(0.6,0.8,0.9,0.05,0.08,scene);
+  const glass = pbr(0.6,0.8,0.9,0.05,0.06,scene);
+  const concMat = pbr(0.52,0.52,0.50,0,0.95,scene);
 
-  // Room (bigger, open)
   officeTiles(90,100,0,0,scene,[0.52,0.52,0.5]);
-  suspendedCeiling(90,100,0,0, 3.8,scene);
-  outerWalls(-45,45,-50,50,3.8,scene,wallM,glass);
+  suspendedCeiling(90,100,0,0,scene);
+  outerWalls(-45,45,-50,50,scene,wallM,glass);
   baseboard(-45,45,-50,50,scene,pbr(0.7,0.68,0.62,0,0.8,scene));
 
-  // Exposed duct runs on ceiling
-  for (let z=-45; z<=45; z+=12) {
-    const duct=BABYLON.MeshBuilder.CreateBox('duct'+z,{width:0.7,height:0.45,depth:90},scene);
-    duct.position.set(-16,3.6,z); duct.material=pbr(0.45,0.45,0.47,0.6,0.4,scene);
-    const d2=duct.clone('d2'+z); d2.position.x=16;
+  // Exposed ductwork at ceiling height
+  const ductMat=pbr(0.45,0.45,0.47,0.6,0.4,scene);
+  for (let x=-18; x<=18; x+=18) {
+    const duct=BABYLON.MeshBuilder.CreateBox('duct'+x,{width:0.75,height:0.5,depth:100},scene);
+    duct.position.set(x,6.7,0); duct.material=ductMat;
+  }
+  // Cross ducts
+  for (let z=-40; z<=40; z+=20) {
+    const duct=BABYLON.MeshBuilder.CreateBox('dz'+z,{width:90,height:0.4,depth:0.6},scene);
+    duct.position.set(0,6.8,z); duct.material=ductMat;
   }
 
-  for (let x=-36; x<=36; x+=9) for (let z=-44; z<=44; z+=9) fluorescentLight(x,z,scene);
+  for (let x=-36; x<=36; x+=9) for (let z=-44; z<=44; z+=9) fluorescentLight(x,z,scene,6.5);
 
-  // Snaking track through open space
   const rawPts = [
     new BABYLON.Vector3(0,0,-44),
     new BABYLON.Vector3(-32,0,-38),
@@ -852,27 +1066,72 @@ function buildOpenOffice(scene, shadows) {
   startFinishLine(0,-44,0,scene);
   cpData = rawPts.map((p,i)=>({x:p.x,z:p.z,finish:i===0}));
 
-  // Standing desk clusters (beside track, not blocking)
+  // Standing desk islands
   const deskPos=[[-18,-30],[18,-30],[-18,-10],[18,-10],[-18,10],[18,10],[-18,28],[18,28],[0,-18],[0,18],[0,0]];
   deskPos.forEach(([x,z])=>officeDesk(x,z,Math.random()*Math.PI*2,scene));
 
-  // Whiteboards as scenic dividers
+  // Whiteboard partitions (scenic, off-track)
   const wbMat=pbr(0.97,0.97,0.96,0,0.5,scene);
+  const wbFrm=pbr(0.15,0.15,0.15,0.5,0.5,scene);
   [[-6,-36,true],[6,10,true],[-6,28,false],[8,-15,false]].forEach(([x,z,vert],i)=>{
-    const wb=BABYLON.MeshBuilder.CreateBox('wb'+i,{width:vert?0.08:3,height:1.8,depth:vert?3:0.08},scene);
-    wb.position.set(x,0.9,z); wb.material=wbMat;
-    const frame=BABYLON.MeshBuilder.CreateBox('wbf'+i,{width:vert?0.12:3.2,height:1.85,depth:vert?3.2:0.12},scene);
-    frame.position.set(x,0.9,z); frame.material=pbr(0.15,0.15,0.15,0.5,0.5,scene);
+    const wb=BABYLON.MeshBuilder.CreateBox('wb'+i,{width:vert?0.08:3,height:2.0,depth:vert?3:0.08},scene);
+    wb.position.set(x,1.0,z); wb.material=wbMat;
+    const frame=BABYLON.MeshBuilder.CreateBox('wbf'+i,{width:vert?0.12:3.2,height:2.05,depth:vert?3.2:0.12},scene);
+    frame.position.set(x,1.0,z); frame.material=wbFrm;
+    // Marker tray at bottom of whiteboard
+    const tray=BABYLON.MeshBuilder.CreateBox('wbt'+i,{width:vert?0.1:3.0,height:0.04,depth:0.1},scene);
+    tray.position.set(x,0.04,z+(vert?0:0.07)); tray.material=wbFrm;
   });
 
-  // Bean bags
-  const bb=pbr(0.78,0.22,0.45,0,0.9,scene);
-  [[-40,35],[40,-35],[-40,-35],[40,35]].forEach(([x,z])=>{
-    const bag=BABYLON.MeshBuilder.CreateSphere('bb'+x,{diameter:1.1},scene); bag.position.set(x,0.55,z); bag.material=bb; bag.scaling.y=0.7;
+  // Bean bag lounge corners
+  const bbMat=pbr(0.78,0.22,0.45,0,0.9,scene);
+  const bbMat2=pbr(0.22,0.6,0.78,0,0.9,scene);
+  [[-40,35],[40,-35],[-40,-35],[40,35]].forEach(([x,z],i)=>{
+    const bag=BABYLON.MeshBuilder.CreateSphere('bb'+x,{diameter:1.1},scene);
+    bag.position.set(x,0.55,z); bag.material=i%2===0?bbMat:bbMat2; bag.scaling.y=0.7;
+    const bag2=BABYLON.MeshBuilder.CreateSphere('bb2'+x,{diameter:0.9},scene);
+    bag2.position.set(x+1.0,0.45,z+0.5); bag2.material=i%2===0?bbMat2:bbMat; bag2.scaling.y=0.7;
+    // Low coffee table
+    const ct=BABYLON.MeshBuilder.CreateBox('ct'+x,{width:0.6,height:0.3,depth:0.6},scene);
+    ct.position.set(x+0.5,0.15,z-0.5); ct.material=pbr(0.5,0.38,0.25,0.05,0.7,scene);
   });
 
-  [[-42,-42],[42,-42],[-42,42],[42,42],[-42,0],[42,0]].forEach(([x,z])=>plant(x,z,scene));
-  waterCooler(-42,20,scene); waterCooler(42,-20,scene);
+  // Break room NW corner
+  coffeeStation(-40,-44,Math.PI/2,scene);
+  vendingMachine(-42,-38,-Math.PI/2,scene);
+  vendingMachine(-42,-46,-Math.PI/2,scene);
+
+  // Printers SE
+  printer(40,44,-Math.PI/2,scene);
+  printer(40,38,-Math.PI/2,scene);
+
+  // Reception
+  receptionDesk(0,-47,0,scene);
+  coatRack(-5,-48,scene); coatRack(5,-48,scene);
+
+  // Plants all around perimeter
+  [[-42,-42],[42,-42],[-42,42],[42,42],[-42,0],[42,0],[-25,-48],[25,-48],[-25,48],[25,48]].forEach(([x,z])=>plant(x,z,scene));
+
+  // Bookshelves on interior walls
+  bookshelf(-8,-48,0,scene); bookshelf(-2,-48,0,scene); bookshelf(4,-48,0,scene);
+  bookshelf(-8,48,Math.PI,scene); bookshelf(-2,48,Math.PI,scene);
+
+  // Wall art & clocks
+  wallPoster(-30,4,-49.7,0,1.6,1.0,[0.15,0.45,0.72],scene);
+  wallPoster(10,4,-49.7,0,1.6,1.0,[0.72,0.28,0.18],scene);
+  wallPoster(30,4,49.7,Math.PI,1.6,1.0,[0.22,0.58,0.32],scene);
+  noticeboard(-44.7,4,-20,Math.PI/2,scene);
+  noticeboard(-44.7,4,20,Math.PI/2,scene);
+  wallClock(-44.7,5,0,Math.PI/2,scene);
+  wallClock(44.7,5,0,-Math.PI/2,scene);
+
+  // Fire extinguishers
+  [[-44,44],[-44,-44],[44,44],[44,-44]].forEach(([x,z])=>fireExt(x,z,scene));
+
+  // Trash bins near desks
+  [[-20,-32],[20,-32],[-20,22],[20,22],[0,-20]].forEach(([x,z])=>trashBin(x,z,scene));
+
+  waterCooler(-42,28,scene); waterCooler(42,-28,scene); waterCooler(0,48,scene);
 
   spawnRacers(scene, 0,-42, shadows);
 }
@@ -883,7 +1142,7 @@ function buildOpenOffice(scene, shadows) {
 function buildExecutiveSuite(scene, shadows) {
   scene.fogColor = new BABYLON.Color3(0.14,0.11,0.09);
   scene.clearColor= new BABYLON.Color4(0.12,0.09,0.07,1);
-  scene.fogStart=35; scene.fogEnd=80;
+  scene.fogStart=40; scene.fogEnd=90;
 
   const marble = pbr(0.86,0.83,0.78,0.25,0.28,scene);
   const mah    = pbr(0.32,0.16,0.08,0.1, 0.4, scene);
@@ -893,73 +1152,124 @@ function buildExecutiveSuite(scene, shadows) {
   const carp   = pbr(0.32,0.22,0.42,0,   0.99,scene);
 
   officeTiles(62,92, 0,0, scene, [0.84,0.81,0.76]);
-  suspendedCeiling(62,92, 0,0, 4.0, scene);
-  outerWalls(-31,31,-46,46, 4.0, scene, darkW, glass);
+  suspendedCeiling(62,92, 0,0, scene);
+  outerWalls(-31,31,-46,46, scene, darkW, glass);
 
-  // Gold trim
-  const trimMat=gold;
+  // Gold vertical trim pilasters on walls
   [-31,31].forEach(x=>{
-    const v=BABYLON.MeshBuilder.CreateBox('vt'+x,{width:0.12,height:4,depth:92},scene); v.position.set(x,2,0); v.material=trimMat;
+    const v=BABYLON.MeshBuilder.CreateBox('vt'+x,{width:0.14,height:7,depth:92},scene); v.position.set(x,3.5,0); v.material=gold;
   });
+  // Gold base and crown moulding
   [-46,46].forEach(z=>{
-    const h=BABYLON.MeshBuilder.CreateBox('ht'+z,{width:62,height:0.12,depth:0.18},scene); h.position.set(0,0.06,z); h.material=trimMat;
-    const ht2=h.clone('ht2'+z); ht2.position.y=3.88;
+    const base=BABYLON.MeshBuilder.CreateBox('ht'+z,{width:62,height:0.15,depth:0.22},scene); base.position.set(0,0.075,z); base.material=gold;
+    const crown=base.clone('cr'+z); crown.position.y=6.88;
+    const mid=base.clone('md'+z); mid.position.y=3.5; mid.scaling.y=0.5;
   });
 
   // Carpet runner
   const runner=BABYLON.MeshBuilder.CreateBox('runner',{width:4,height:0.01,depth:92},scene);
   runner.position.set(0,0.01,0); runner.material=carp;
 
-  // Chandeliers
+  // Chandeliers (drop from true ceiling at 7)
   [[0,-30],[0,0],[0,30]].forEach(([x,z])=>{
-    const chain=BABYLON.MeshBuilder.CreateCylinder('chain'+z,{height:1.2,diameter:0.03},scene);
-    chain.position.set(x,3.4,z); chain.material=gold;
-    const bowl=BABYLON.MeshBuilder.CreateSphere('bowl'+z,{diameter:1.0},scene);
-    bowl.position.set(x,2.7,z); bowl.material=pbr(0.88,0.92,0.98,0.1,0.05,scene); bowl.scaling.y=0.5;
-    const pl=new BABYLON.PointLight('cpl'+z,new BABYLON.Vector3(x,2.5,z),scene);
-    pl.intensity=1.2; pl.range=18; pl.diffuse=new BABYLON.Color3(1,0.9,0.72);
+    const chain=BABYLON.MeshBuilder.CreateCylinder('chain'+z,{height:2.8,diameter:0.025},scene);
+    chain.position.set(x,5.6,z); chain.material=gold;
+    const bowl=BABYLON.MeshBuilder.CreateSphere('bowl'+z,{diameter:1.1},scene);
+    bowl.position.set(x,4.0,z); bowl.material=pbr(0.88,0.92,0.98,0.1,0.04,scene); bowl.scaling.y=0.5;
+    // Crystal drops
+    for (let i=0;i<8;i++) {
+      const a=i/8*Math.PI*2;
+      const drop=BABYLON.MeshBuilder.CreateBox('drop'+z+i,{width:0.03,height:0.22,depth:0.03},scene);
+      drop.position.set(x+Math.sin(a)*0.42,3.75,z+Math.cos(a)*0.42); drop.material=pbr(0.88,0.93,1,0.02,0.04,scene);
+    }
+    const pl=new BABYLON.PointLight('cpl'+z,new BABYLON.Vector3(x,3.5,z),scene);
+    pl.intensity=1.5; pl.range=22; pl.diffuse=new BABYLON.Color3(1,0.9,0.72);
   });
 
-  // Marble pillars lining the room
+  // Marble pillars with ornate caps
   [[-22,-36],[-22,-18],[-22,0],[-22,18],[-22,36],[22,-36],[22,-18],[22,0],[22,18],[22,36]].forEach(([x,z])=>{
-    const p=BABYLON.MeshBuilder.CreateCylinder('pil'+x+z,{height:4,diameter:1.1},scene);
-    p.position.set(x,2,z); p.material=marble;
-    const cap=BABYLON.MeshBuilder.CreateCylinder('cap'+x+z,{height:0.2,diameter:1.3},scene);
-    cap.position.set(x,4.1,z); cap.material=gold;
-    const base=cap.clone('base'+x+z); base.position.y=0.1;
+    const p=BABYLON.MeshBuilder.CreateCylinder('pil'+x+z,{height:7,diameter:1.1},scene);
+    p.position.set(x,3.5,z); p.material=marble;
+    const cap=BABYLON.MeshBuilder.CreateCylinder('cap'+x+z,{height:0.28,diameter:1.35},scene);
+    cap.position.set(x,7.14,z); cap.material=gold;
+    const pilbase=BABYLON.MeshBuilder.CreateCylinder('plb'+x+z,{height:0.22,diameter:1.3},scene);
+    pilbase.position.set(x,0.11,z); pilbase.material=gold;
     shadows.addShadowCaster(p,true);
   });
 
-  // Boardroom table
+  // Grand boardroom table with leather insert
   const bt=BABYLON.MeshBuilder.CreateBox('bt',{width:5.5,height:0.12,depth:12},scene);
-  bt.position.set(0,0.82,0); bt.material=mah;
-  shadows.addShadowCaster(bt,true);
-  // Table legs
+  bt.position.set(0,0.82,0); bt.material=mah; shadows.addShadowCaster(bt,true);
+  const leather=BABYLON.MeshBuilder.CreateBox('lth',{width:4.8,height:0.02,depth:11.0},scene);
+  leather.position.set(0,0.89,0); leather.material=pbr(0.12,0.18,0.1,0,0.95,scene);
+  // Gold edge inlay
+  const inlay=BABYLON.MeshBuilder.CreateBox('inl',{width:5.3,height:0.015,depth:11.7},scene);
+  inlay.position.set(0,0.885,0); inlay.material=gold;
   [[-2.4,-5.2],[-2.4,5.2],[2.4,-5.2],[2.4,5.2]].forEach(([x,z])=>{
-    const tl=BABYLON.MeshBuilder.CreateCylinder('tl'+x,{height:0.82,diameter:0.25},scene);
+    const tl=BABYLON.MeshBuilder.CreateCylinder('tl'+x,{height:0.82,diameter:0.28},scene);
     tl.position.set(x,0.41,z); tl.material=mah;
   });
-
-  // Boardroom chairs around table
-  const bcMat=pbr(0.08,0.06,0.05,0.2,0.7,scene);
-  for (let z=-4.5; z<=4.5; z+=2) {
-    [[-3.8,z],[3.8,z]].forEach(([x,zz])=>{
-      const bc=BABYLON.MeshBuilder.CreateBox('bc'+x+zz,{width:0.55,height:0.08,depth:0.55},scene);
-      bc.position.set(x,0.9,zz); bc.material=bcMat;
-      const bcb=BABYLON.MeshBuilder.CreateBox('bcb'+x+zz,{width:0.52,height:0.7,depth:0.08},scene);
-      bcb.position.set(x,1.25,zz-(x<0?-0.25:0.25)); bcb.material=bcMat;
-    });
-  }
-
-  // Executive desks in side alcoves
-  [[-27,-38],[27,-38],[-27,38],[27,38]].forEach(([x,z],i)=>{
-    officeDesk(x,z,x<0?Math.PI/2:-Math.PI/2,scene);
-    // Trophy
-    const tr=BABYLON.MeshBuilder.CreateCylinder('tr'+i,{height:0.55,diameterTop:0.1,diameterBottom:0.2},scene);
-    tr.position.set(x+0.5,1.1,z); tr.material=gold;
+  // Water carafes on table
+  [[-1,0],[1,-3],[0,3]].forEach(([x,z])=>{
+    const car=BABYLON.MeshBuilder.CreateCylinder('car'+x+z,{height:0.28,diameterTop:0.06,diameterBottom:0.1},scene);
+    car.position.set(x,1.0,z); car.material=pbr(0.7,0.88,0.95,0.05,0.1,scene);
   });
 
-  // Narrow winding track with tight corners
+  // Executive chairs around boardroom table (proper with backs)
+  const bcMat=pbr(0.08,0.06,0.05,0.2,0.7,scene);
+  const bcCush=pbr(0.12,0.09,0.07,0.1,0.85,scene);
+  for (let z=-4.5; z<=4.5; z+=2) {
+    [[-3.8,z,Math.PI/2],[3.8,z,-Math.PI/2]].forEach(([x,zz,ry])=>{
+      const g=new BABYLON.TransformNode('bch'+x+zz,scene); g.position.set(x,0,zz); g.rotation.y=ry;
+      const seat=BABYLON.MeshBuilder.CreateBox('bcs',{width:0.62,height:0.08,depth:0.62},scene); seat.parent=g; seat.position.y=0.88; seat.material=bcCush;
+      const back=BABYLON.MeshBuilder.CreateBox('bcb',{width:0.6,height:0.72,depth:0.07},scene); back.parent=g; back.position.set(0,1.24,-0.28); back.material=bcMat;
+      const col=BABYLON.MeshBuilder.CreateCylinder('bcc',{height:0.88,diameter:0.06},scene); col.parent=g; col.position.y=0.44; col.material=pbr(0.6,0.6,0.6,0.8,0.25,scene);
+    });
+  }
+  // Head-of-table chairs
+  [[0,-7],[0,7]].forEach(([x,z],i)=>{
+    const g=new BABYLON.TransformNode('hch'+i,scene); g.position.set(x,0,z); g.rotation.y=i===0?0:Math.PI;
+    const seat=BABYLON.MeshBuilder.CreateBox('hcs',{width:0.72,height:0.08,depth:0.72},scene); seat.parent=g; seat.position.y=0.88; seat.material=bcCush;
+    const back=BABYLON.MeshBuilder.CreateBox('hcb',{width:0.7,height:0.85,depth:0.07},scene); back.parent=g; back.position.set(0,1.32,-0.33); back.material=bcMat;
+    const col=BABYLON.MeshBuilder.CreateCylinder('hcc',{height:0.88,diameter:0.07},scene); col.parent=g; col.position.y=0.44; col.material=pbr(0.6,0.6,0.6,0.8,0.25,scene);
+  });
+
+  // Executive desks with credenzas
+  [[-27,-38],[27,-38],[-27,38],[27,38]].forEach(([x,z],i)=>{
+    officeDesk(x,z,x<0?Math.PI/2:-Math.PI/2,scene);
+    // Credenza (side cabinet)
+    const cred=BABYLON.MeshBuilder.CreateBox('cred'+i,{width:1.8,height:0.75,depth:0.5},scene);
+    cred.position.set(x+(x<0?1.5:-1.5),0.375,z); cred.material=mah;
+    const credtop=BABYLON.MeshBuilder.CreateBox('crdt'+i,{width:1.82,height:0.04,depth:0.52},scene);
+    credtop.position.set(x+(x<0?1.5:-1.5),0.77,z); credtop.material=pbr(0.84,0.8,0.75,0.2,0.28,scene);
+    // Trophy on credenza
+    const tr=BABYLON.MeshBuilder.CreateCylinder('tr'+i,{height:0.62,diameterTop:0.12,diameterBottom:0.24},scene);
+    tr.position.set(x+(x<0?1.8:-1.8),1.12,z); tr.material=gold;
+    const trball=BABYLON.MeshBuilder.CreateSphere('trb'+i,{diameter:0.18},scene);
+    trball.position.set(x+(x<0?1.8:-1.8),1.5,z); trball.material=gold;
+    // Framed art on adjacent wall section
+    wallPoster(x<0?-30.6:-30.6, 4.0, z, x<0?Math.PI/2:-Math.PI/2, 1.2, 0.9, [0.55,0.42,0.28], scene);
+  });
+
+  // Wall art & plaques
+  wallPoster(0,4.5,-45.7,0,2.0,1.3,[0.28,0.2,0.12],scene);
+  wallPoster(-18,4.5,-45.7,0,1.4,0.9,[0.45,0.35,0.18],scene);
+  wallPoster(18,4.5,-45.7,0,1.4,0.9,[0.35,0.22,0.12],scene);
+  wallClock(0,5.5,-45.7,0,scene);
+  wallClock(0,5.5,45.7,Math.PI,scene);
+
+  // Notice board / awards wall
+  noticeboard(-29.5,4,30,Math.PI/2,scene);
+  noticeboard(-29.5,4,10,Math.PI/2,scene);
+
+  // Fire extinguishers (subtle, in corners)
+  [[-29,44],[-29,-44],[29,44],[29,-44]].forEach(([x,z])=>fireExt(x,z,scene));
+
+  // Plants in ornate positions
+  [[-28,38],[28,38],[-28,-38],[28,-38],[-28,0],[28,0]].forEach(([x,z])=>plant(x,z,scene));
+  waterCooler(-28,22,scene);
+
+  // Narrow winding track
   const rawPts = [
     new BABYLON.Vector3(0,0,-40),
     new BABYLON.Vector3(-18,0,-38),
@@ -979,9 +1289,6 @@ function buildExecutiveSuite(scene, shadows) {
   buildRoad(rawPts, 7, scene);
   startFinishLine(0,-40,0,scene);
   cpData = rawPts.map((p,i)=>({x:p.x,z:p.z,finish:i===0}));
-
-  [[-28,0],[28,0],[-28,-20],[28,20]].forEach(([x,z])=>plant(x,z,scene));
-  waterCooler(-28,15,scene);
 
   spawnRacers(scene, 0, -38, shadows);
 }

@@ -3,305 +3,110 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Office Chair Racing</title>
+  <title>Chair GP – Office Chair Racing</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #1a1a2e; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
-    #renderCanvas { width: 100vw; height: 100vh; display: block; }
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#000;overflow:hidden;font-family:'Segoe UI',sans-serif}
+    #c{width:100vw;height:100vh;display:block;touch-action:none}
 
-    #ui {
-      position: fixed;
-      top: 0; left: 0; right: 0;
-      pointer-events: none;
-      z-index: 10;
-    }
+    /* ── HUD ── */
+    #hud{position:fixed;top:0;left:0;right:0;pointer-events:none;z-index:10;padding:14px 20px;display:none;justify-content:space-between;align-items:flex-start}
+    .hbox{background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:8px 16px;backdrop-filter:blur(8px);color:#fff}
+    .hl{font-size:9px;text-transform:uppercase;letter-spacing:2px;color:#888}
+    .hv{font-size:22px;font-weight:800;color:#00d4ff;margin-top:1px}
+    #pos-box{position:fixed;bottom:24px;left:20px;pointer-events:none;z-index:10;display:none}
+    #pos-inner{background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:8px 16px;backdrop-filter:blur(8px);color:#fff;text-align:center}
+    #pos-n{font-size:44px;font-weight:900;color:#00d4ff;line-height:1}
+    #pos-s{font-size:14px;color:#888}
+    #spd-box{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);pointer-events:none;z-index:10;display:none}
+    #spd-inner{background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:10px 18px;backdrop-filter:blur(8px);color:#fff;text-align:center;min-width:140px}
+    .sl{font-size:9px;text-transform:uppercase;letter-spacing:2px;color:#888;margin-bottom:4px}
+    .sbar{height:5px;background:rgba(255,255,255,.1);border-radius:3px;overflow:hidden;margin-bottom:4px}
+    .sfill{height:100%;background:linear-gradient(90deg,#00ff88,#00d4ff);border-radius:3px;transition:width .08s}
+    .snum{font-size:16px;font-weight:700;color:#00d4ff}
+    #mm-wrap{position:fixed;bottom:24px;right:20px;background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:8px;backdrop-filter:blur(8px);display:none}
+    #mm{display:block;border-radius:5px}
+    #offroad{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,120,0,.8);color:#fff;font-size:18px;font-weight:800;padding:10px 28px;border-radius:99px;display:none;z-index:20;pointer-events:none}
 
-    #hud {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      padding: 16px 24px;
-    }
+    /* ── MENU ── */
+    #menu{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(135deg,#0d0d1a,#111827,#0f2744);z-index:100}
+    #menu h1{font-size:58px;font-weight:900;color:#fff;text-shadow:0 0 50px #00d4ff99;margin-bottom:4px;letter-spacing:-2px}
+    #menu .sub{font-size:13px;color:#666;letter-spacing:4px;text-transform:uppercase;margin-bottom:40px}
+    .tgrid{display:grid;grid-template-columns:repeat(3,210px);gap:14px;margin-bottom:34px}
+    .tc{background:rgba(255,255,255,.04);border:2px solid rgba(255,255,255,.08);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s;pointer-events:all;text-align:center}
+    .tc:hover,.tc.sel{border-color:#00d4ff;background:rgba(0,212,255,.09);transform:translateY(-5px);box-shadow:0 10px 40px rgba(0,212,255,.2)}
+    .tc .ico{font-size:38px;margin-bottom:10px}
+    .tc h3{color:#fff;font-size:14px;margin-bottom:5px}
+    .tc p{color:#666;font-size:11px;line-height:1.5}
+    .tc .dif{display:inline-block;margin-top:8px;padding:2px 10px;border-radius:99px;font-size:10px;font-weight:800}
+    .easy{background:#00ff8822;color:#00ff88}.med{background:#ffaa0022;color:#ffaa00}.hard{background:#ff444422;color:#ff4444}
+    #go{pointer-events:all;background:linear-gradient(135deg,#00d4ff,#0099cc);color:#000;border:none;padding:15px 54px;font-size:17px;font-weight:800;border-radius:99px;cursor:pointer;letter-spacing:1px;text-transform:uppercase;box-shadow:0 4px 28px rgba(0,212,255,.45);transition:all .2s}
+    #go:hover{transform:scale(1.06);box-shadow:0 6px 36px rgba(0,212,255,.65)}
+    .hint{margin-top:22px;color:#444;font-size:11px;letter-spacing:1px}
+    .hint kbd{color:#666;background:rgba(255,255,255,.06);padding:1px 7px;border-radius:4px;margin:0 2px}
 
-    .hud-box {
-      background: rgba(0,0,0,0.6);
-      border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 8px;
-      padding: 10px 18px;
-      color: #fff;
-      backdrop-filter: blur(6px);
-    }
+    /* ── COUNTDOWN ── */
+    #cd{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:90;opacity:0;transition:opacity .3s}
+    #cdn{font-size:200px;font-weight:900;color:#fff;text-shadow:0 0 100px #00d4ff;line-height:1}
 
-    .hud-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: #aaa; }
-    .hud-value { font-size: 22px; font-weight: 700; color: #00d4ff; margin-top: 2px; }
-    .hud-value.warn { color: #ff6b35; }
-
-    #minimap-container {
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      background: rgba(0,0,0,0.6);
-      border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 8px;
-      padding: 8px;
-      backdrop-filter: blur(6px);
-    }
-    #minimap-container canvas { display: block; border-radius: 4px; }
-
-    #menu {
-      position: fixed;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-      z-index: 100;
-    }
-
-    #menu h1 {
-      font-size: 52px;
-      font-weight: 900;
-      color: #fff;
-      text-shadow: 0 0 40px #00d4ff88;
-      margin-bottom: 6px;
-      letter-spacing: -1px;
-    }
-
-    #menu .subtitle {
-      font-size: 16px;
-      color: #888;
-      margin-bottom: 40px;
-      letter-spacing: 3px;
-      text-transform: uppercase;
-    }
-
-    .track-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 220px);
-      gap: 16px;
-      margin-bottom: 36px;
-    }
-
-    .track-card {
-      background: rgba(255,255,255,0.05);
-      border: 2px solid rgba(255,255,255,0.1);
-      border-radius: 12px;
-      padding: 20px;
-      cursor: pointer;
-      transition: all 0.2s;
-      pointer-events: all;
-      text-align: center;
-    }
-
-    .track-card:hover, .track-card.selected {
-      border-color: #00d4ff;
-      background: rgba(0,212,255,0.1);
-      transform: translateY(-4px);
-      box-shadow: 0 8px 32px rgba(0,212,255,0.2);
-    }
-
-    .track-card .icon { font-size: 40px; margin-bottom: 10px; }
-    .track-card h3 { color: #fff; font-size: 15px; margin-bottom: 6px; }
-    .track-card p { color: #888; font-size: 12px; line-height: 1.5; }
-    .track-card .diff {
-      display: inline-block;
-      margin-top: 8px;
-      padding: 2px 10px;
-      border-radius: 99px;
-      font-size: 11px;
-      font-weight: 700;
-    }
-    .diff.easy { background: #00ff8833; color: #00ff88; }
-    .diff.medium { background: #ffaa0033; color: #ffaa00; }
-    .diff.hard { background: #ff444433; color: #ff4444; }
-
-    #start-btn {
-      pointer-events: all;
-      background: linear-gradient(135deg, #00d4ff, #0099cc);
-      color: #000;
-      border: none;
-      padding: 16px 56px;
-      font-size: 18px;
-      font-weight: 800;
-      border-radius: 99px;
-      cursor: pointer;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      transition: all 0.2s;
-      box-shadow: 0 4px 24px rgba(0,212,255,0.4);
-    }
-
-    #start-btn:hover { transform: scale(1.05); box-shadow: 0 6px 32px rgba(0,212,255,0.6); }
-
-    .controls-hint {
-      margin-top: 24px;
-      color: #555;
-      font-size: 12px;
-      letter-spacing: 1px;
-    }
-    .controls-hint span { color: #777; background: rgba(255,255,255,0.07); padding: 2px 8px; border-radius: 4px; margin: 0 2px; }
-
-    #countdown {
-      position: fixed;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 90;
-      pointer-events: none;
-      opacity: 0;
-    }
-
-    #countdown .num {
-      font-size: 180px;
-      font-weight: 900;
-      color: #fff;
-      text-shadow: 0 0 80px #00d4ff;
-    }
-
-    #finish-screen {
-      position: fixed;
-      inset: 0;
-      display: none;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: rgba(0,0,0,0.85);
-      backdrop-filter: blur(10px);
-      z-index: 100;
-    }
-
-    #finish-screen h2 { font-size: 60px; font-weight: 900; color: #fff; margin-bottom: 8px; }
-    #finish-screen .result { font-size: 80px; margin-bottom: 24px; }
-    #finish-screen .time-display { font-size: 28px; color: #00d4ff; margin-bottom: 32px; }
-    #finish-screen button {
-      pointer-events: all;
-      background: #00d4ff;
-      color: #000;
-      border: none;
-      padding: 14px 44px;
-      font-size: 16px;
-      font-weight: 700;
-      border-radius: 99px;
-      cursor: pointer;
-      margin: 6px;
-      transition: all 0.2s;
-    }
-    #finish-screen button:hover { transform: scale(1.05); }
-    #finish-screen button.secondary { background: rgba(255,255,255,0.1); color: #fff; }
-
-    #position-indicator {
-      position: fixed;
-      bottom: 20px;
-      left: 24px;
-      background: rgba(0,0,0,0.6);
-      border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 8px;
-      padding: 10px 18px;
-      color: #fff;
-      backdrop-filter: blur(6px);
-    }
-    #position-indicator .pos-num { font-size: 40px; font-weight: 900; color: #00d4ff; line-height: 1; }
-    #position-indicator .pos-total { font-size: 18px; color: #888; }
-
-    #speed-bar {
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,0.6);
-      border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 8px;
-      padding: 10px 20px;
-      color: #fff;
-      backdrop-filter: blur(6px);
-      text-align: center;
-      min-width: 160px;
-    }
-    .speed-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: #aaa; margin-bottom: 4px; }
-    .speed-bar-track { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
-    .speed-bar-fill { height: 100%; background: linear-gradient(90deg, #00ff88, #00d4ff); border-radius: 3px; transition: width 0.1s; }
-    .speed-num { font-size: 18px; font-weight: 700; color: #00d4ff; margin-top: 4px; }
+    /* ── FINISH ── */
+    #fin{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.88);backdrop-filter:blur(12px);z-index:100}
+    #fin .icon{font-size:90px;margin-bottom:10px}
+    #fin h2{font-size:64px;font-weight:900;color:#fff;margin-bottom:6px}
+    #fin .t{font-size:26px;color:#00d4ff;margin-bottom:30px}
+    #fin button{pointer-events:all;background:#00d4ff;color:#000;border:none;padding:13px 42px;font-size:15px;font-weight:800;border-radius:99px;cursor:pointer;margin:5px;transition:all .2s}
+    #fin button:hover{transform:scale(1.06)}
+    #fin button.sec{background:rgba(255,255,255,.08);color:#fff}
   </style>
 </head>
 <body>
+<canvas id="c"></canvas>
 
-<canvas id="renderCanvas"></canvas>
-
-<div id="ui">
-  <div id="hud">
-    <div class="hud-box">
-      <div class="hud-label">Lap</div>
-      <div class="hud-value" id="hud-lap">1 / 3</div>
-    </div>
-    <div class="hud-box">
-      <div class="hud-label">Time</div>
-      <div class="hud-value" id="hud-time">0:00.00</div>
-    </div>
-    <div class="hud-box">
-      <div class="hud-label">Best Lap</div>
-      <div class="hud-value" id="hud-best">--:--.--</div>
-    </div>
-  </div>
+<div id="hud" style="display:none">
+  <div class="hbox"><div class="hl">Lap</div><div class="hv" id="h-lap">1 / 3</div></div>
+  <div class="hbox"><div class="hl">Time</div><div class="hv" id="h-time">0:00.00</div></div>
+  <div class="hbox"><div class="hl">Best Lap</div><div class="hv" id="h-best">--:--.--</div></div>
 </div>
-
-<div id="position-indicator">
-  <div class="pos-num" id="pos-num">1</div>
-  <div class="pos-total">st / 2</div>
-</div>
-
-<div id="speed-bar">
-  <div class="speed-label">Speed</div>
-  <div class="speed-bar-track"><div class="speed-bar-fill" id="speed-fill" style="width:0%"></div></div>
-  <div class="speed-num" id="speed-num">0 km/h</div>
-</div>
-
-<div id="minimap-container">
-  <canvas id="minimap" width="140" height="140"></canvas>
-</div>
-
-<div id="countdown">
-  <div class="num" id="countdown-num">3</div>
-</div>
+<div id="pos-box" style="display:none"><div id="pos-inner"><div id="pos-n">1</div><div id="pos-s">of 2</div></div></div>
+<div id="spd-box" style="display:none"><div id="spd-inner"><div class="sl">Speed</div><div class="sbar"><div class="sfill" id="sf" style="width:0"></div></div><div class="snum" id="sn">0 km/h</div></div></div>
+<div id="mm-wrap" style="display:none"><canvas id="mm" width="150" height="150"></canvas></div>
+<div id="offroad">OFF ROAD ⚠️</div>
 
 <div id="menu">
   <h1>🪑 Chair GP</h1>
-  <p class="subtitle">Office Chair Racing Championship</p>
-  <div class="track-grid">
-    <div class="track-card selected" data-track="0" onclick="selectTrack(0)">
-      <div class="icon">🏢</div>
+  <p class="sub">Office Chair Racing Championship</p>
+  <div class="tgrid">
+    <div class="tc sel" data-t="0" onclick="selTrack(0)">
+      <div class="ico">🏢</div>
       <h3>Cubicle Canyon</h3>
-      <p>Navigate the maze of cubicles in the corporate jungle</p>
-      <span class="diff easy">Easy</span>
+      <p>Weave through the maze of cubicle farms. Tight turns, long straights.</p>
+      <span class="dif easy">Easy</span>
     </div>
-    <div class="track-card" data-track="1" onclick="selectTrack(1)">
-      <div class="icon">🏗️</div>
+    <div class="tc" data-t="1" onclick="selTrack(1)">
+      <div class="ico">☕</div>
       <h3>Open Office Chaos</h3>
-      <p>Dodge standing desks and whiteboards in this startup hellscape</p>
-      <span class="diff medium">Medium</span>
+      <p>Standing desks, bean bags and whiteboards block your path.</p>
+      <span class="dif med">Medium</span>
     </div>
-    <div class="track-card" data-track="2" onclick="selectTrack(2)">
-      <div class="icon">👔</div>
+    <div class="tc" data-t="2" onclick="selTrack(2)">
+      <div class="ico">👔</div>
       <h3>Executive Suite</h3>
-      <p>Race through mahogany corridors and the boardroom</p>
-      <span class="diff hard">Hard</span>
+      <p>The mahogany boardroom. Pillars, tight corners and no mercy.</p>
+      <span class="dif hard">Hard</span>
     </div>
   </div>
-  <button id="start-btn" onclick="startGame()">Start Race</button>
-  <p class="controls-hint">
-    <span>W A S D</span> or <span>Arrow Keys</span> to steer &nbsp;|&nbsp; <span>Space</span> to brake &nbsp;|&nbsp; <span>R</span> to reset
-  </p>
+  <button id="go" onclick="startGame()">Start Race</button>
+  <p class="hint"><kbd>W A S D</kbd> steer &nbsp;·&nbsp; <kbd>Space</kbd> brake &nbsp;·&nbsp; <kbd>R</kbd> reset</p>
 </div>
 
-<div id="finish-screen">
-  <div class="result" id="finish-emoji">🏆</div>
-  <h2 id="finish-title">YOU WIN!</h2>
-  <div class="time-display" id="finish-time">Total: 1:23.45</div>
-  <div>
-    <button onclick="restartRace()">Race Again</button>
-    <button class="secondary" onclick="backToMenu()">Menu</button>
-  </div>
+<div id="cd"><div id="cdn">3</div></div>
+
+<div id="fin" style="display:none">
+  <div class="icon" id="fi">🏆</div>
+  <h2 id="ft">YOU WIN!</h2>
+  <div class="t" id="ftime">Total: 1:23.45</div>
+  <button onclick="restartRace()">Race Again</button>
+  <button class="sec" onclick="backMenu()">Menu</button>
 </div>
 
 <script src="https://cdn.babylonjs.com/babylon.js"></script>

@@ -1,948 +1,987 @@
-// ─── Office Chair Racing – game.js ───────────────────────────────────────────
+// ── Chair GP – game.js ────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const engine = new BABYLON.Engine(canvas, true);
 
-const canvas = document.getElementById('renderCanvas');
-const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
-
-// ─── Global state ────────────────────────────────────────────────────────────
-let scene, camera, physicsPlugin;
-let playerChair, aiChair;
+// ── State ─────────────────────────────────────────────────────────────────────
+let scene, camera;
+let playerRoot, aiRoot;
+let playerLegs = {}, aiLegs = {};
+let legPhase = 0, aiLegPhase = 0;
 let currentTrack = 0;
-let gameRunning = false;
-let raceStartTime = 0;
-let lapStartTime = 0;
-let playerLap = 1;
-let aiLap = 1;
-let playerCheckpoint = 0;
-let aiCheckpoint = 0;
-let bestLapTime = Infinity;
+let gameRunning = false, raceFinished = false;
+let raceStart = 0, lapStart = 0;
+let playerLap = 1, aiLap = 1;
+let playerCP = 0, aiCP = 0;
+let passedCPs = [];
+let bestLap = Infinity;
 let totalLaps = 3;
-let raceFinished = false;
 let keys = {};
-let aiWaypoints = [];
-let aiWaypointIndex = 0;
-let checkpointMeshes = [];
-let playerCheckpointsPassed = [];
-let aiSpeed = 0;
-let playerSpeed = 0;
-let minimapCtx, minimapCanvas;
-let trackLayout = [];
+let playerSpeed = 0, aiSpeed = 0;
+let playerOnRoad = true;
+let trackCenterLine = [];   // smooth spline points
+let cpData = [];
+let aiWPIdx = 0;
+let mmCtx;
 
-// ─── Menu ────────────────────────────────────────────────────────────────────
-function selectTrack(idx) {
-  currentTrack = idx;
-  document.querySelectorAll('.track-card').forEach(c => c.classList.remove('selected'));
-  document.querySelector(`[data-track="${idx}"]`).classList.add('selected');
+// ── Menu ──────────────────────────────────────────────────────────────────────
+function selTrack(i) {
+  currentTrack = i;
+  document.querySelectorAll('.tc').forEach(c => c.classList.remove('sel'));
+  document.querySelector(`[data-t="${i}"]`).classList.add('sel');
 }
-
 function startGame() {
   document.getElementById('menu').style.display = 'none';
   initScene();
-  runCountdown();
+  countdown();
 }
-
 function restartRace() {
-  document.getElementById('finish-screen').style.display = 'none';
-  engine.stopRenderLoop();
-  scene.dispose();
-  initScene();
-  runCountdown();
+  document.getElementById('fin').style.display = 'none';
+  engine.stopRenderLoop(); scene.dispose(); initScene(); countdown();
 }
-
-function backToMenu() {
-  document.getElementById('finish-screen').style.display = 'none';
-  engine.stopRenderLoop();
-  scene.dispose();
+function backMenu() {
+  document.getElementById('fin').style.display = 'none';
+  engine.stopRenderLoop(); scene.dispose();
   document.getElementById('menu').style.display = 'flex';
+  ['hud','pos-box','spd-box','mm-wrap'].forEach(id => document.getElementById(id).style.display = 'none');
 }
-
-function runCountdown() {
+function showHUD() {
+  document.getElementById('hud').style.display = 'flex';
+  document.getElementById('pos-box').style.display = 'block';
+  document.getElementById('spd-box').style.display = 'block';
+  document.getElementById('mm-wrap').style.display = 'block';
+}
+function countdown() {
   gameRunning = false;
-  const el = document.getElementById('countdown');
-  const num = document.getElementById('countdown-num');
+  const el = document.getElementById('cd');
+  const num = document.getElementById('cdn');
   el.style.opacity = '1';
-  let count = 3;
-  num.textContent = count;
-
-  const tick = setInterval(() => {
-    count--;
-    if (count > 0) {
-      num.textContent = count;
-    } else if (count === 0) {
-      num.textContent = 'GO!';
-      num.style.color = '#00ff88';
-    } else {
-      clearInterval(tick);
-      el.style.opacity = '0';
-      num.style.color = '#fff';
+  let c = 3; num.textContent = c; num.style.color = '#fff';
+  const t = setInterval(() => {
+    c--;
+    if (c > 0) { num.textContent = c; }
+    else if (c === 0) { num.textContent = 'GO!'; num.style.color = '#00ff88'; }
+    else {
+      clearInterval(t); el.style.opacity = '0';
       gameRunning = true;
-      raceStartTime = performance.now();
-      lapStartTime = performance.now();
+      raceStart = lapStart = performance.now();
     }
   }, 1000);
 }
 
-// ─── Scene init ──────────────────────────────────────────────────────────────
+// ── Scene ─────────────────────────────────────────────────────────────────────
 function initScene() {
-  playerLap = 1; aiLap = 1;
-  playerCheckpoint = 0; aiCheckpoint = 0;
-  bestLapTime = Infinity; raceFinished = false;
-  playerCheckpointsPassed = [];
-  aiWaypointIndex = 0;
-  aiSpeed = 0; playerSpeed = 0;
-  updateHUD(0, 1);
+  playerSpeed = 0; aiSpeed = 0; legPhase = 0; aiLegPhase = 0;
+  playerLap = 1; aiLap = 1; playerCP = 0; aiCP = 0;
+  passedCPs = []; bestLap = Infinity; raceFinished = false;
+  playerLegs = {}; aiLegs = {}; trackCenterLine = []; cpData = []; aiWPIdx = 0;
 
   scene = new BABYLON.Scene(engine);
-  scene.enablePhysics(new BABYLON.Vector3(0, -20, 0), new BABYLON.CannonJSPlugin());
-  scene.gravity = new BABYLON.Vector3(0, -20, 0);
-  scene.collisionsEnabled = true;
+  scene.clearColor = new BABYLON.Color4(0.55, 0.6, 0.65, 1);
   scene.fogMode = BABYLON.Scene.FOGMODE_LINEAR;
-  scene.fogStart = 60;
-  scene.fogEnd = 120;
+  scene.fogStart = 55; scene.fogEnd = 110;
 
-  // Camera (follows player)
-  camera = new BABYLON.FollowCamera('cam', new BABYLON.Vector3(0, 5, -12), scene);
-  camera.radius = 12;
-  camera.heightOffset = 5;
+  // Lighting – office interior feel
+  const amb = new BABYLON.HemisphericLight('amb', new BABYLON.Vector3(0,1,0), scene);
+  amb.intensity = 0.55;
+  amb.diffuse = new BABYLON.Color3(0.95, 0.92, 0.88);
+  amb.groundColor = new BABYLON.Color3(0.3, 0.3, 0.35);
+
+  const dir = new BABYLON.DirectionalLight('dir', new BABYLON.Vector3(-0.5,-1,-0.3), scene);
+  dir.intensity = 0.75;
+  dir.position = new BABYLON.Vector3(20, 40, 20);
+  const shadows = new BABYLON.ShadowGenerator(2048, dir);
+  shadows.useBlurExponentialShadowMap = true;
+
+  // Follow camera – low angle like Mario Kart
+  camera = new BABYLON.FollowCamera('cam', new BABYLON.Vector3(0, 4, -14), scene);
+  camera.radius = 11;
+  camera.heightOffset = 3.5;
   camera.rotationOffset = 180;
-  camera.cameraAcceleration = 0.05;
-  camera.maxCameraSpeed = 20;
+  camera.cameraAcceleration = 0.06;
+  camera.maxCameraSpeed = 22;
+  camera.fov = 1.1;
 
-  // Lighting
-  const ambient = new BABYLON.HemisphericLight('amb', new BABYLON.Vector3(0, 1, 0), scene);
-  ambient.intensity = 0.6;
-  ambient.groundColor = new BABYLON.Color3(0.3, 0.3, 0.4);
+  mmCtx = document.getElementById('mm').getContext('2d');
 
-  const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-1, -2, -1), scene);
-  sun.intensity = 0.8;
-  sun.position = new BABYLON.Vector3(30, 50, 30);
+  const tracks = [buildCubicleCanyon, buildOpenOffice, buildExecutiveSuite];
+  tracks[currentTrack](scene, shadows);
 
-  const shadowGen = new BABYLON.ShadowGenerator(1024, sun);
-  shadowGen.useBlurExponentialShadowMap = true;
+  showHUD();
+  updateHUD(0,1);
 
-  // Build selected track
-  const tracks = [buildCubicleCanyonTrack, buildOpenOfficeTrack, buildExecutiveSuiteTrack];
-  tracks[currentTrack](scene, shadowGen);
+  window.onkeydown = e => { keys[e.code] = true; if(e.code==='Space') e.preventDefault(); };
+  window.onkeyup   = e => { keys[e.code] = false; };
 
-  // Minimap
-  minimapCanvas = document.getElementById('minimap');
-  minimapCtx = minimapCanvas.getContext('2d');
-
-  // Input
-  keys = {};
-  window.addEventListener('keydown', e => { keys[e.code] = true; });
-  window.addEventListener('keyup', e => { keys[e.code] = false; });
-
-  // Render loop
   engine.runRenderLoop(() => {
+    const dt = engine.getDeltaTime() / 1000;
     if (gameRunning && !raceFinished) {
-      updatePlayer();
-      updateAI();
-      updateHUD(performance.now() - raceStartTime, playerLap);
-      updateMinimap();
+      updatePlayer(dt);
+      updateAI(dt);
+      updateHUD(performance.now() - raceStart, playerLap);
+      drawMinimap();
       updatePosition();
-      checkReset();
     }
     scene.render();
   });
-
-  window.addEventListener('resize', () => engine.resize());
+  window.onresize = () => engine.resize();
 }
 
-// ─── Player update ───────────────────────────────────────────────────────────
-function updatePlayer() {
-  if (!playerChair) return;
-  const dt = engine.getDeltaTime() / 1000;
-  const maxSpeed = 18;
-  const accel = 12;
-  const turnSpeed = 2.2;
-  const drag = 0.88;
-  const brakeForce = 0.6;
+// ── Road mesh from centerline points ──────────────────────────────────────────
+function buildRoad(rawPts, w, scene) {
+  // Catmull-Rom smooth
+  const curve = BABYLON.Curve3.CreateCatmullRomSpline(rawPts, 12, true);
+  const pts = curve.getPoints();
+  trackCenterLine = pts;
 
-  const fwd = keys['KeyW'] || keys['ArrowUp'];
-  const back = keys['KeyS'] || keys['ArrowDown'];
-  const left = keys['KeyA'] || keys['ArrowLeft'];
-  const right = keys['KeyD'] || keys['ArrowRight'];
-  const brake = keys['Space'];
+  const pos = [], idx = [], uvs = [], nrm = [];
 
-  // Speed
-  if (fwd) playerSpeed = Math.min(playerSpeed + accel * dt, maxSpeed);
-  else if (back) playerSpeed = Math.max(playerSpeed - accel * dt, -maxSpeed * 0.5);
-  else playerSpeed *= drag;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const n = pts[(i + 1) % pts.length];
+    const tang = n.subtract(p);
+    tang.y = 0;
+    if (tang.length() < 0.0001) tang.x = 0.001;
+    tang.normalize();
+    const right = new BABYLON.Vector3(tang.z, 0, -tang.x);
 
-  if (brake) playerSpeed *= brakeForce;
+    const L = p.add(right.scale(-w * 0.5));
+    const R = p.add(right.scale( w * 0.5));
 
-  // Turn
-  if (Math.abs(playerSpeed) > 0.5) {
-    const dir = playerSpeed > 0 ? 1 : -1;
-    if (left) playerChair.rotation.y -= turnSpeed * dt * dir;
-    if (right) playerChair.rotation.y += turnSpeed * dt * dir;
-  }
-
-  // Move
-  const angle = playerChair.rotation.y;
-  const vx = Math.sin(angle) * playerSpeed * dt;
-  const vz = Math.cos(angle) * playerSpeed * dt;
-
-  const newPos = playerChair.position.add(new BABYLON.Vector3(vx, 0, vz));
-  if (!checkWallCollision(newPos)) {
-    playerChair.position.copyFrom(newPos);
-  } else {
-    playerSpeed *= -0.3;
-  }
-
-  // Keep grounded
-  playerChair.position.y = 0.25;
-
-  camera.lockedTarget = playerChair;
-}
-
-// ─── AI update ───────────────────────────────────────────────────────────────
-function updateAI() {
-  if (!aiChair || aiWaypoints.length === 0) return;
-  const dt = engine.getDeltaTime() / 1000;
-
-  const target = aiWaypoints[aiWaypointIndex];
-  const diff = target.subtract(aiChair.position);
-  diff.y = 0;
-  const dist = diff.length();
-
-  if (dist < 3) {
-    aiWaypointIndex = (aiWaypointIndex + 1) % aiWaypoints.length;
-    // count AI checkpoints/laps
-    if (aiWaypointIndex === 0) aiLap++;
-  }
-
-  // Steer toward waypoint
-  const desiredAngle = Math.atan2(diff.x, diff.z);
-  let angleDiff = desiredAngle - aiChair.rotation.y;
-  while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-  while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-  aiChair.rotation.y += angleDiff * 3 * dt;
-
-  // Speed varies by track difficulty
-  const speeds = [13, 14.5, 15.5];
-  const maxAI = speeds[currentTrack];
-  aiSpeed = Math.min(aiSpeed + 8 * dt, maxAI);
-
-  const angle = aiChair.rotation.y;
-  const vx = Math.sin(angle) * aiSpeed * dt;
-  const vz = Math.cos(angle) * aiSpeed * dt;
-  const newPos = aiChair.position.add(new BABYLON.Vector3(vx, 0, vz));
-  if (!checkWallCollision(newPos)) {
-    aiChair.position.copyFrom(newPos);
-  }
-  aiChair.position.y = 0.25;
-}
-
-// ─── Wall collision ───────────────────────────────────────────────────────────
-function checkWallCollision(pos) {
-  for (const seg of trackLayout) {
-    if (seg.type === 'wall') {
-      const dx = pos.x - seg.cx;
-      const dz = pos.z - seg.cz;
-      const hw = seg.hw + 0.8;
-      const hd = seg.hd + 0.8;
-      if (Math.abs(dx) < hw && Math.abs(dz) < hd) return true;
-    }
-    if (seg.type === 'bounds') {
-      if (pos.x < seg.minX + 0.8 || pos.x > seg.maxX - 0.8 ||
-          pos.z < seg.minZ + 0.8 || pos.z > seg.maxZ - 0.8) return true;
+    pos.push(L.x, 0.02, L.z, R.x, 0.02, R.z);
+    uvs.push(0, i * 0.25, 1, i * 0.25);
+    nrm.push(0,1,0, 0,1,0);
+    if (i < pts.length - 1) {
+      const b = i * 2;
+      idx.push(b, b+2, b+1, b+1, b+2, b+3);
     }
   }
-  return false;
+  const last = (pts.length - 1) * 2;
+  idx.push(last, 0, last+1, last+1, 0, 1);
+
+  const mesh = new BABYLON.Mesh('road', scene);
+  const vd = new BABYLON.VertexData();
+  vd.positions = pos; vd.indices = idx; vd.normals = nrm; vd.uvs = uvs;
+  vd.applyToMesh(mesh);
+  mesh.receiveShadows = true;
+
+  // Road material – dark asphalt
+  const rm = new BABYLON.PBRMaterial('roadmat', scene);
+  rm.albedoColor = new BABYLON.Color3(0.18, 0.18, 0.19);
+  rm.metallic = 0; rm.roughness = 0.95;
+  mesh.material = rm;
+
+  // Center dashed line
+  buildRoadMarkings(pts, w, scene);
+  // Barriers
+  buildBarriers(pts, w, scene);
+
+  return pts;
 }
 
-// ─── Checkpoint / lap logic ───────────────────────────────────────────────────
-function registerCheckpoint(mesh, idx, isFinish) {
-  scene.registerBeforeRender(() => {
-    if (!playerChair || raceFinished) return;
+function buildRoadMarkings(pts, w, scene) {
+  const dashMat = new BABYLON.PBRMaterial('dash', scene);
+  dashMat.albedoColor = new BABYLON.Color3(0.95, 0.9, 0.1);
+  dashMat.metallic = 0; dashMat.roughness = 0.8;
 
-    // Player
-    const pd = BABYLON.Vector3.Distance(playerChair.position, mesh.position);
-    if (pd < 4 && !playerCheckpointsPassed.includes(idx)) {
-      playerCheckpointsPassed.push(idx);
+  const edgeMat = new BABYLON.PBRMaterial('edge', scene);
+  edgeMat.albedoColor = new BABYLON.Color3(0.95, 0.95, 0.95);
+  edgeMat.metallic = 0; edgeMat.roughness = 0.8;
 
-      if (isFinish && playerCheckpointsPassed.length >= checkpointMeshes.length) {
-        playerLap++;
-        playerCheckpointsPassed = [];
-        const lapTime = performance.now() - lapStartTime;
-        lapStartTime = performance.now();
-        if (lapTime < bestLapTime) bestLapTime = lapTime;
-        document.getElementById('hud-best').textContent = formatTime(bestLapTime);
+  for (let i = 0; i < pts.length; i += 6) {
+    const p = pts[i];
+    const n = pts[Math.min(i+3, pts.length-1)];
+    const mid = p.add(n).scale(0.5);
+    const tang = n.subtract(p); tang.y = 0; tang.normalize();
+    const right = new BABYLON.Vector3(tang.z, 0, -tang.x);
+    const len = BABYLON.Vector3.Distance(p, n) + 0.01;
+    const angle = Math.atan2(tang.x, tang.z);
 
-        if (playerLap > totalLaps) {
-          finishRace(true, performance.now() - raceStartTime);
-        }
-      }
-    }
-  });
-}
+    // Center dash
+    const dash = BABYLON.MeshBuilder.CreateBox('d'+i, {width:0.18, height:0.01, depth:len*0.5}, scene);
+    dash.position.set(mid.x, 0.03, mid.z);
+    dash.rotation.y = angle;
+    dash.material = dashMat;
 
-function finishRace(playerWon, totalMs) {
-  raceFinished = true;
-  gameRunning = false;
-  const screen = document.getElementById('finish-screen');
-  document.getElementById('finish-emoji').textContent = playerWon ? '🏆' : '😅';
-  document.getElementById('finish-title').textContent = playerWon ? 'YOU WIN!' : 'SO CLOSE!';
-  document.getElementById('finish-time').textContent = 'Total: ' + formatTime(totalMs);
-  screen.style.display = 'flex';
-}
-
-function checkReset() {
-  if (keys['KeyR']) {
-    if (playerChair) {
-      playerChair.position.copyFrom(getStartPosition());
-      playerChair.rotation.y = 0;
-      playerSpeed = 0;
-    }
+    // Edge lines
+    [-1,1].forEach(side => {
+      const ep = mid.add(right.scale(side * (w*0.5 - 0.25)));
+      const el = BABYLON.MeshBuilder.CreateBox('el'+i+side, {width:0.12, height:0.01, depth:len*1.05}, scene);
+      el.position.set(ep.x, 0.03, ep.z);
+      el.rotation.y = angle;
+      el.material = edgeMat;
+    });
   }
+}
 
-  // AI wins
-  if (!raceFinished && aiLap > totalLaps) {
-    finishRace(false, performance.now() - raceStartTime);
+function buildBarriers(pts, w, scene) {
+  const redMat = new BABYLON.PBRMaterial('bR', scene);
+  redMat.albedoColor = new BABYLON.Color3(0.85, 0.1, 0.1);
+  redMat.metallic = 0.1; redMat.roughness = 0.5;
+
+  const whtMat = new BABYLON.PBRMaterial('bW', scene);
+  whtMat.albedoColor = new BABYLON.Color3(0.95, 0.95, 0.95);
+  whtMat.metallic = 0.1; whtMat.roughness = 0.5;
+
+  const half = w * 0.5 + 0.4;
+
+  for (let i = 0; i < pts.length; i += 4) {
+    const p = pts[i];
+    const n = pts[Math.min(i+2, pts.length-1)];
+    const mid = p.add(n).scale(0.5);
+    const tang = n.subtract(p); tang.y = 0; tang.normalize();
+    const right = new BABYLON.Vector3(tang.z, 0, -tang.x);
+    const len = BABYLON.Vector3.Distance(p, n) + 0.05;
+    const angle = Math.atan2(tang.x, tang.z);
+    const mat = (i/4) % 2 === 0 ? redMat : whtMat;
+
+    [-1, 1].forEach(side => {
+      const bp = mid.add(right.scale(side * half));
+      const b = BABYLON.MeshBuilder.CreateBox('bar'+i+side, {width:0.3, height:0.55, depth:len}, scene);
+      b.position.set(bp.x, 0.28, bp.z);
+      b.rotation.y = angle;
+      b.material = mat;
+      b.receiveShadows = true;
+    });
   }
 }
 
-function getStartPosition() {
-  return new BABYLON.Vector3(0, 0.25, -30);
-}
-
-// ─── HUD ──────────────────────────────────────────────────────────────────────
-function updateHUD(ms, lap) {
-  document.getElementById('hud-time').textContent = formatTime(ms);
-  document.getElementById('hud-lap').textContent = Math.min(lap, totalLaps) + ' / ' + totalLaps;
-  const kmh = Math.abs(Math.round(playerSpeed * 3.6));
-  document.getElementById('speed-num').textContent = kmh + ' km/h';
-  document.getElementById('speed-fill').style.width = Math.min(kmh / 65 * 100, 100) + '%';
-}
-
-function updatePosition() {
-  const playerProgress = (playerLap - 1) * 100 + (playerCheckpoint / Math.max(checkpointMeshes.length, 1)) * 100;
-  const aiProgress = (aiLap - 1) * 100 + (aiWaypointIndex / Math.max(aiWaypoints.length, 1)) * 100;
-  const pos = playerProgress >= aiProgress ? 1 : 2;
-  document.getElementById('pos-num').textContent = pos;
-}
-
-function formatTime(ms) {
-  if (!ms || ms === Infinity) return '--:--.--';
-  const m = Math.floor(ms / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  const cs = Math.floor((ms % 1000) / 10);
-  return `${m}:${String(s).padStart(2,'0')}.${String(cs).padStart(2,'0')}`;
-}
-
-// ─── Minimap ─────────────────────────────────────────────────────────────────
-function updateMinimap() {
-  if (!minimapCtx || !playerChair) return;
-  const ctx = minimapCtx;
-  const W = 140, H = 140;
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#111';
-  ctx.fillRect(0, 0, W, H);
-
-  const scale = 1.4;
-  const ox = W / 2, oy = H / 2;
-
-  // Draw track segments
-  ctx.fillStyle = '#2a2a3a';
-  for (const seg of trackLayout) {
-    if (seg.type === 'floor') {
-      const x = ox + seg.cx * scale / 4;
-      const y = oy + seg.cz * scale / 4;
-      ctx.fillRect(x - seg.hw * scale / 4, y - seg.hd * scale / 4, seg.hw * scale / 2, seg.hd * scale / 2);
-    }
+// ── Is player on road? ────────────────────────────────────────────────────────
+function onRoad(pos, roadHalfWidth) {
+  if (!trackCenterLine.length) return true;
+  let best = Infinity;
+  for (let i = 0; i < trackCenterLine.length; i++) {
+    const p = trackCenterLine[i];
+    const d = Math.sqrt((pos.x-p.x)**2 + (pos.z-p.z)**2);
+    if (d < best) best = d;
   }
-
-  // AI dot
-  if (aiChair) {
-    const ax = ox + aiChair.position.x * scale / 4;
-    const ay = oy + aiChair.position.z * scale / 4;
-    ctx.fillStyle = '#ff6b35';
-    ctx.beginPath(); ctx.arc(ax, ay, 4, 0, Math.PI * 2); ctx.fill();
-  }
-
-  // Player dot
-  const px = ox + playerChair.position.x * scale / 4;
-  const py = oy + playerChair.position.z * scale / 4;
-  ctx.fillStyle = '#00d4ff';
-  ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill();
+  return best < roadHalfWidth;
 }
 
-// ─── Material helpers ─────────────────────────────────────────────────────────
-function mat(name, r, g, b, scene, metallic = 0, roughness = 0.8) {
-  const m = new BABYLON.PBRMaterial(name, scene);
-  m.albedoColor = new BABYLON.Color3(r, g, b);
-  m.metallic = metallic;
-  m.roughness = roughness;
-  return m;
+// ── Office chair mesh ─────────────────────────────────────────────────────────
+function pbr(r,g,b,met,rou,scene) {
+  const m = new BABYLON.PBRMaterial('m'+Math.random(), scene);
+  m.albedoColor = new BABYLON.Color3(r,g,b);
+  m.metallic = met; m.roughness = rou; return m;
 }
 
-function box(name, w, h, d, x, y, z, scene, material) {
-  const b = BABYLON.MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
-  b.position.set(x, y, z);
-  b.material = material;
-  b.receiveShadows = true;
-  return b;
-}
+function createWorkerChair(id, scene, seatColor, shirtHex) {
+  const root = new BABYLON.TransformNode(id, scene);
+  const refs = {};
 
-// ─── Office Chair mesh ────────────────────────────────────────────────────────
-function createChairMesh(name, scene, color) {
-  const root = new BABYLON.TransformNode(name, scene);
+  const seatMat  = pbr(...seatColor, 0.05, 0.85, scene);
+  const armMat   = pbr(0.12,0.12,0.12, 0.4, 0.5, scene);
+  const metalMat = pbr(0.65,0.65,0.67, 0.9, 0.25, scene);
+  const skinMat  = pbr(0.92,0.76,0.62, 0,   0.95, scene);
+  const shirtMat = pbr(...shirtHex,   0,   0.85, scene);
+  const pantsMat = pbr(0.18,0.18,0.28, 0,   0.9, scene);
+  const shoeMat  = pbr(0.1, 0.1, 0.1,  0.2, 0.8, scene);
+  const hairMat  = pbr(0.2, 0.15,0.1,  0,   1,   scene);
+  const wheelMat = pbr(0.15,0.15,0.15, 0.3, 0.7, scene);
 
-  // Seat
-  const seatMat = mat(name + '_seat', color.r, color.g, color.b, scene, 0.1, 0.7);
-  const seat = BABYLON.MeshBuilder.CreateBox('seat', { width: 0.9, height: 0.12, depth: 0.9 }, scene);
-  seat.position.y = 0.56;
-  seat.material = seatMat;
-  seat.parent = root;
+  const mk = (name, opt) => { const b = BABYLON.MeshBuilder.CreateBox(name+id, opt, scene); b.parent=root; b.receiveShadows=true; return b; };
+  const cyl = (name, opt) => { const c = BABYLON.MeshBuilder.CreateCylinder(name+id, opt, scene); c.parent=root; return c; };
+  const sph = (name, opt) => { const s = BABYLON.MeshBuilder.CreateSphere(name+id, opt, scene); s.parent=root; return s; };
 
-  // Back rest
-  const back = BABYLON.MeshBuilder.CreateBox('back', { width: 0.85, height: 0.8, depth: 0.1 }, scene);
-  back.position.set(0, 1.0, -0.4);
-  back.material = seatMat;
-  back.parent = root;
+  // ── Chair ──
+  // Seat base
+  const seat = mk('seat', {width:0.92,height:0.1,depth:0.9}); seat.position.y=0.5; seat.material=seatMat;
+  const cushion = mk('cush', {width:0.82,height:0.07,depth:0.8}); cushion.position.y=0.56; cushion.material=seatMat;
 
-  // Cushion
-  const cushMat = mat(name + '_cush', color.r * 0.7, color.g * 0.7, color.b * 0.7, scene, 0, 0.9);
-  const cushion = BABYLON.MeshBuilder.CreateBox('cush', { width: 0.8, height: 0.08, depth: 0.8 }, scene);
-  cushion.position.y = 0.64;
-  cushion.material = cushMat;
-  cushion.parent = root;
+  // Backrest
+  const back = mk('back', {width:0.88,height:0.78,depth:0.09}); back.position.set(0,0.96,-0.41); back.material=seatMat;
+  const backPad = mk('bpad', {width:0.78,height:0.66,depth:0.06}); backPad.position.set(0,0.97,-0.38); backPad.material=seatMat;
 
-  // Arm rests
-  const armMat = mat(name + '_arm', 0.15, 0.15, 0.15, scene, 0.3, 0.6);
-  [-0.5, 0.5].forEach(side => {
-    const arm = BABYLON.MeshBuilder.CreateBox('arm', { width: 0.08, height: 0.08, depth: 0.7 }, scene);
-    arm.position.set(side, 0.72, 0);
-    arm.material = armMat;
-    arm.parent = root;
-    const vpost = BABYLON.MeshBuilder.CreateBox('vpost', { width: 0.06, height: 0.2, depth: 0.06 }, scene);
-    vpost.position.set(side, 0.62, 0.2);
-    vpost.material = armMat;
-    vpost.parent = root;
+  // Armrests
+  [-0.52,0.52].forEach((x,i) => {
+    const vp = mk('avp'+i, {width:0.06,height:0.22,depth:0.06}); vp.position.set(x,0.56,0.18); vp.material=armMat;
+    const ar = mk('ar'+i,  {width:0.06,height:0.06,depth:0.6});  ar.position.set(x,0.67,0.02); ar.material=armMat;
+    const pad = mk('arp'+i,{width:0.1, height:0.04,depth:0.55}); pad.position.set(x,0.7,0.02);  pad.material=seatMat;
   });
 
   // Central column
-  const colMat = mat(name + '_col', 0.6, 0.6, 0.6, scene, 0.9, 0.3);
-  const col = BABYLON.MeshBuilder.CreateCylinder('col', { height: 0.5, diameter: 0.08 }, scene);
-  col.position.y = 0.25;
-  col.material = colMat;
-  col.parent = root;
+  const col = cyl('col', {height:0.48,diameter:0.07}); col.position.y=0.25; col.material=metalMat;
+  // Pneumatic cylinder highlight
+  const pneu = cyl('pneu', {height:0.22,diameter:0.05}); pneu.position.y=0.4; pneu.material=pbr(0.8,0.8,0.82,0.9,0.2,scene);
 
-  // Base star
-  const baseMat = mat(name + '_base', 0.2, 0.2, 0.2, scene, 0.8, 0.4);
-  for (let i = 0; i < 5; i++) {
-    const angle = (i / 5) * Math.PI * 2;
-    const spoke = BABYLON.MeshBuilder.CreateBox('spoke', { width: 0.06, height: 0.04, depth: 0.4 }, scene);
-    spoke.position.set(Math.sin(angle) * 0.2, 0.04, Math.cos(angle) * 0.2);
-    spoke.rotation.y = angle;
-    spoke.material = baseMat;
-    spoke.parent = root;
-
-    const wheel = BABYLON.MeshBuilder.CreateCylinder('wheel', { height: 0.06, diameter: 0.12 }, scene);
-    wheel.rotation.x = Math.PI / 2;
-    wheel.position.set(Math.sin(angle) * 0.38, 0.06, Math.cos(angle) * 0.38);
-    wheel.material = baseMat;
-    wheel.parent = root;
+  // Star base (5 arms)
+  for (let i=0; i<5; i++) {
+    const a = (i/5)*Math.PI*2;
+    const arm = mk('barm'+i, {width:0.05,height:0.04,depth:0.38}); arm.position.set(Math.sin(a)*0.19,0.03,Math.cos(a)*0.19); arm.rotation.y=a; arm.material=metalMat;
+    const whl = cyl('whl'+i, {height:0.055,diameter:0.11}); whl.rotation.x=Math.PI/2; whl.position.set(Math.sin(a)*0.37,0.055,Math.cos(a)*0.37); whl.material=wheelMat;
   }
 
-  // Worker character (simplified)
-  const skinMat = mat(name + '_skin', 0.9, 0.75, 0.6, scene, 0, 0.9);
-  const shirtColors = [
-    [0.2, 0.3, 0.7], [0.7, 0.2, 0.2], [0.2, 0.6, 0.3], [0.5, 0.2, 0.6]
-  ];
-  const sc = shirtColors[Math.floor(Math.random() * shirtColors.length)];
-  const shirtMat = mat(name + '_shirt', sc[0], sc[1], sc[2], scene, 0, 0.8);
-  const pantsMat = mat(name + '_pants', 0.15, 0.15, 0.25, scene, 0, 0.9);
-
+  // ── Worker ──
   // Torso
-  const torso = BABYLON.MeshBuilder.CreateBox('torso', { width: 0.5, height: 0.55, depth: 0.3 }, scene);
-  torso.position.y = 1.2;
-  torso.material = shirtMat;
-  torso.parent = root;
-
+  const torso = mk('torso', {width:0.48,height:0.52,depth:0.28}); torso.position.y=1.14; torso.material=shirtMat;
+  // Collar
+  const collar = mk('collar', {width:0.22,height:0.1,depth:0.2}); collar.position.y=1.42; collar.material=shirtMat;
+  // Neck
+  const neck = mk('neck', {width:0.14,height:0.12,depth:0.14}); neck.position.y=1.52; neck.material=skinMat;
   // Head
-  const head = BABYLON.MeshBuilder.CreateSphere('head', { diameter: 0.35 }, scene);
-  head.position.y = 1.7;
-  head.material = skinMat;
-  head.parent = root;
-
+  const head = sph('head', {diameter:0.34, segments:10}); head.position.y=1.72; head.material=skinMat;
   // Hair
-  const hairMat = mat(name + '_hair', 0.2, 0.15, 0.1, scene, 0, 1);
-  const hair = BABYLON.MeshBuilder.CreateSphere('hair', { diameter: 0.36, slice: 0.5 }, scene);
-  hair.position.y = 1.85;
-  hair.material = hairMat;
-  hair.parent = root;
-
-  // Arms gripping
-  [-0.38, 0.38].forEach((side, idx) => {
-    const arm = BABYLON.MeshBuilder.CreateBox('arm', { width: 0.14, height: 0.4, depth: 0.14 }, scene);
-    arm.position.set(side, 1.05, 0);
-    arm.rotation.z = side < 0 ? 0.3 : -0.3;
-    arm.material = shirtMat;
-    arm.parent = root;
-
-    const hand = BABYLON.MeshBuilder.CreateSphere('hand', { diameter: 0.16 }, scene);
-    hand.position.set(side * 1.1, 0.85, 0.2);
-    hand.material = skinMat;
-    hand.parent = root;
+  const hair = sph('hair', {diameter:0.35, segments:8}); hair.position.y=1.83; hair.material=hairMat; hair.scaling.y=0.55;
+  // Face features (eyes as dark spots)
+  [-0.07,0.07].forEach((x,i) => {
+    const eye = sph('eye'+i, {diameter:0.04}); eye.position.set(x,1.73,0.155); eye.material=pbr(0.05,0.05,0.08,0,0.9,scene);
   });
 
-  // Legs
-  [-0.18, 0.18].forEach(side => {
-    const leg = BABYLON.MeshBuilder.CreateBox('leg', { width: 0.18, height: 0.35, depth: 0.18 }, scene);
-    leg.position.set(side, 0.8, 0.15);
-    leg.material = pantsMat;
-    leg.parent = root;
-
-    const shoe = BABYLON.MeshBuilder.CreateBox('shoe', { width: 0.16, height: 0.1, depth: 0.25 }, scene);
-    shoe.position.set(side, 0.62, 0.25);
-    shoe.material = mat(name + '_shoe', 0.1, 0.1, 0.1, scene, 0.2, 0.8);
-    shoe.parent = root;
+  // Upper arms
+  [-0.32,0.32].forEach((x,i) => {
+    const ua = mk('ua'+i, {width:0.12,height:0.36,depth:0.12}); ua.position.set(x,1.12,0.04); ua.rotation.z=x<0?0.35:-0.35; ua.material=shirtMat;
   });
 
-  return root;
+  // Lower arms / hands on armrests
+  [-0.5,0.5].forEach((x,i) => {
+    const la = mk('la'+i, {width:0.1,height:0.28,depth:0.1}); la.position.set(x,0.82,0.05); la.rotation.z=x<0?0.1:-0.1; la.material=skinMat;
+    const hand = sph('hand'+i, {diameter:0.1}); hand.position.set(x*1.0,0.7,0.22); hand.material=skinMat;
+  });
+
+  // ── Legs (these will be animated) ──
+  // The thighs sit on the seat, lower legs hang down, feet scoot
+  [-0.16,0.16].forEach((x,i) => {
+    const side = i===0 ? 'L' : 'R';
+
+    // Thigh (pivot from hip)
+    const thigh = new BABYLON.TransformNode('thigh'+side+id, scene);
+    thigh.parent = root;
+    thigh.position.set(x, 0.52, 0.22);
+
+    const thighMesh = mk('thighM'+side, {width:0.16,height:0.36,depth:0.16});
+    thighMesh.parent = thigh;
+    thighMesh.position.y = -0.18;
+    thighMesh.material = pantsMat;
+
+    // Knee / lower leg (pivot from knee)
+    const knee = new BABYLON.TransformNode('knee'+side+id, scene);
+    knee.parent = thigh;
+    knee.position.y = -0.36;
+
+    const shinMesh = mk('shin'+side, {width:0.13,height:0.34,depth:0.13});
+    shinMesh.parent = knee;
+    shinMesh.position.y = -0.17;
+    shinMesh.material = pantsMat;
+
+    // Foot
+    const foot = mk('foot'+side, {width:0.12,height:0.08,depth:0.22});
+    foot.parent = knee;
+    foot.position.set(0,-0.36,0.06);
+    foot.material = shoeMat;
+
+    refs['thigh'+side] = thigh;
+    refs['knee'+side] = knee;
+  });
+
+  return { root, refs };
 }
 
-// ─── Floor tile helper ────────────────────────────────────────────────────────
-function createFloor(name, w, d, x, z, scene, material) {
-  const f = BABYLON.MeshBuilder.CreateBox(name, { width: w, height: 0.2, depth: d }, scene);
-  f.position.set(x, -0.1, z);
-  f.material = material;
-  f.receiveShadows = true;
-  trackLayout.push({ type: 'floor', cx: x, cz: z, hw: w / 2, hd: d / 2 });
-  return f;
+// ── Leg animation (called per frame) ─────────────────────────────────────────
+function animateLegs(refs, phase, speed) {
+  const mag = Math.min(Math.abs(speed) / 15, 1);
+  const kick = Math.sin(phase) * 0.75 * mag;
+  const kneeFlare = Math.max(kick * 0.4, 0);
+
+  if (refs.thighL) {
+    refs.thighL.rotation.x = kick;
+    refs.kneeL.rotation.x  = Math.abs(kick) * 0.5;
+  }
+  if (refs.thighR) {
+    refs.thighR.rotation.x = -kick;
+    refs.kneeR.rotation.x  = Math.abs(kick) * 0.5;
+  }
 }
 
-function createWall(name, w, h, d, x, y, z, scene, material) {
-  const wall = BABYLON.MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
-  wall.position.set(x, y, z);
-  wall.material = material;
-  wall.receiveShadows = true;
-  trackLayout.push({ type: 'wall', cx: x, cz: z, hw: w / 2, hd: d / 2 });
-  return wall;
+// ── Player update ─────────────────────────────────────────────────────────────
+function updatePlayer(dt) {
+  if (!playerRoot) return;
+
+  const fwd  = keys['KeyW'] || keys['ArrowUp'];
+  const back = keys['KeyS'] || keys['ArrowDown'];
+  const left = keys['KeyA'] || keys['ArrowLeft'];
+  const right= keys['KeyD'] || keys['ArrowRight'];
+  const brake= keys['Space'];
+
+  const maxSpd = 16;
+  const accel  = 14;
+  const turn   = 2.3;
+  const drag   = 0.87;
+
+  if (fwd)   playerSpeed = Math.min(playerSpeed + accel * dt, maxSpd);
+  else if (back) playerSpeed = Math.max(playerSpeed - accel * dt * 0.7, -maxSpd * 0.4);
+  else playerSpeed *= drag;
+
+  if (brake) playerSpeed *= 0.7;
+
+  // Off-road penalty
+  playerOnRoad = onRoad(playerRoot.position, 4.5);
+  document.getElementById('offroad').style.display = playerOnRoad ? 'none' : 'block';
+  const spdCap = playerOnRoad ? maxSpd : maxSpd * 0.35;
+  if (Math.abs(playerSpeed) > spdCap) playerSpeed *= 0.92;
+
+  if (Math.abs(playerSpeed) > 0.4) {
+    const dir = playerSpeed > 0 ? 1 : -1;
+    if (left)  playerRoot.rotation.y -= turn * dt * dir;
+    if (right) playerRoot.rotation.y += turn * dt * dir;
+  }
+
+  const angle = playerRoot.rotation.y;
+  const nx = playerRoot.position.x + Math.sin(angle) * playerSpeed * dt;
+  const nz = playerRoot.position.z + Math.cos(angle) * playerSpeed * dt;
+  playerRoot.position.x = nx;
+  playerRoot.position.z = nz;
+  playerRoot.position.y = 0;
+
+  // Kick legs
+  if (Math.abs(playerSpeed) > 0.3) legPhase += Math.abs(playerSpeed) * dt * 2.8;
+  animateLegs(playerLegs, legPhase, playerSpeed);
+
+  // Body tilt into turn
+  const tilt = ((left ? 1 : 0) - (right ? 1 : 0)) * 0.08 * Math.min(Math.abs(playerSpeed)/8,1);
+  playerRoot.rotation.z = tilt;
+
+  camera.lockedTarget = playerRoot;
+
+  // Reset
+  if (keys['KeyR']) {
+    const sp = trackCenterLine[0] || new BABYLON.Vector3(0,0,0);
+    playerRoot.position.copyFrom(new BABYLON.Vector3(sp.x-1.5, 0, sp.z));
+    playerRoot.rotation.y = 0; playerSpeed = 0;
+  }
+
+  checkPlayerCheckpoints();
 }
 
-// ─── TRACK 0: Cubicle Canyon ──────────────────────────────────────────────────
-function buildCubicleCanyonTrack(scene, shadowGen) {
-  trackLayout = [];
-  checkpointMeshes = [];
-  aiWaypoints = [];
+// ── AI update ─────────────────────────────────────────────────────────────────
+function updateAI(dt) {
+  if (!aiRoot || !cpData.length) return;
+  const target = new BABYLON.Vector3(cpData[aiWPIdx].x, 0, cpData[aiWPIdx].z);
+  const diff = target.subtract(aiRoot.position); diff.y = 0;
+  const dist = diff.length();
 
-  scene.fogColor = new BABYLON.Color3(0.85, 0.9, 1.0);
-  scene.clearColor = new BABYLON.Color4(0.85, 0.9, 1.0, 1);
-
-  const floorMat = mat('floor', 0.75, 0.75, 0.78, scene, 0, 0.95);
-  const wallMat = mat('wall', 0.88, 0.88, 0.9, scene, 0, 0.8);
-  const cubMat = mat('cub', 0.6, 0.55, 0.5, scene, 0, 0.9);
-  const ceilMat = mat('ceil', 0.95, 0.95, 0.95, scene, 0, 1);
-  const accentMat = mat('accent', 0.2, 0.5, 0.9, scene, 0.1, 0.7);
-
-  // Track is a figure-8 style loop through cubicle rows
-  // Outer bounds
-  trackLayout.push({ type: 'bounds', minX: -35, maxX: 35, minZ: -42, maxZ: 42 });
-
-  // Floor sections
-  createFloor('f1', 70, 84, 0, 0, scene, floorMat);
-
-  // Ceiling
-  const ceil = BABYLON.MeshBuilder.CreateBox('ceil', { width: 70, height: 0.3, depth: 84 }, scene);
-  ceil.position.set(0, 3.5, 0);
-  ceil.material = ceilMat;
-
-  // Outer walls
-  createWall('wN', 70, 4, 0.5, 0, 2, -42, scene, wallMat);
-  createWall('wS', 70, 4, 0.5, 0, 2, 42, scene, wallMat);
-  createWall('wE', 0.5, 4, 84, 0, 2, 35, scene, wallMat);
-  createWall('wW', 0.5, 4, 84, 0, 2, -35, scene, wallMat);
-
-  // Cubicle dividers – create rows
-  const divH = 1.5;
-  // Row 1 (left corridor)
-  for (let z = -36; z < 36; z += 6) {
-    createWall('cd' + z, 8, divH, 0.15, -18, divH / 2, z, scene, cubMat);
-    // Desk inside cubicle
-    const desk = BABYLON.MeshBuilder.CreateBox('desk', { width: 1.8, height: 0.6, depth: 0.9 }, scene);
-    desk.position.set(-20, 0.3, z + 1);
-    desk.material = mat('desk', 0.6, 0.48, 0.38, scene, 0, 0.9);
-    // Monitor
-    const mon = BABYLON.MeshBuilder.CreateBox('mon', { width: 0.6, height: 0.5, depth: 0.05 }, scene);
-    mon.position.set(-20.3, 0.85, z + 1.2);
-    mon.material = mat('mon', 0.1, 0.1, 0.1, scene, 0.5, 0.4);
+  if (dist < 4) {
+    aiWPIdx = (aiWPIdx + 1) % cpData.length;
+    if (aiWPIdx === 0) aiLap++;
+    if (!raceFinished && aiLap > totalLaps) finishRace(false);
   }
 
-  // Row 2 (right corridor)
-  for (let z = -33; z < 36; z += 6) {
-    createWall('cd2_' + z, 8, divH, 0.15, 18, divH / 2, z, scene, cubMat);
-    const desk = BABYLON.MeshBuilder.CreateBox('desk2', { width: 1.8, height: 0.6, depth: 0.9 }, scene);
-    desk.position.set(20, 0.3, z + 1);
-    desk.material = mat('desk2', 0.6, 0.48, 0.38, scene, 0, 0.9);
-  }
+  const want = Math.atan2(diff.x, diff.z);
+  let dA = want - aiRoot.rotation.y;
+  while (dA > Math.PI)  dA -= Math.PI*2;
+  while (dA < -Math.PI) dA += Math.PI*2;
+  aiRoot.rotation.y += dA * 2.8 * dt;
 
-  // Center dividing wall with openings
-  createWall('cmid1', 0.3, 3, 15, 0, 1.5, -28, scene, wallMat);
-  createWall('cmid2', 0.3, 3, 15, 0, 1.5, -8, scene, wallMat);
-  createWall('cmid3', 0.3, 3, 15, 0, 1.5, 13, scene, wallMat);
-  createWall('cmid4', 0.3, 3, 15, 0, 1.5, 33, scene, wallMat);
+  const topSpeeds = [13.5, 14.8, 15.8];
+  const top = topSpeeds[currentTrack];
+  aiSpeed = Math.min(aiSpeed + 9 * dt, top);
 
-  // Obstacle: filing cabinets
-  const cabinetMat = mat('cab', 0.4, 0.5, 0.6, scene, 0.4, 0.5);
-  const cabPositions = [[-10, 5], [10, -10], [-5, 20], [5, -25], [-12, -15], [12, 15]];
-  cabPositions.forEach(([x, z], i) => {
-    const cab = BABYLON.MeshBuilder.CreateBox('cab' + i, { width: 0.8, height: 1.3, depth: 0.5 }, scene);
-    cab.position.set(x, 0.65, z);
-    cab.material = cabinetMat;
-    trackLayout.push({ type: 'wall', cx: x, cz: z, hw: 0.9, hd: 0.7 });
-    shadowGen.addShadowCaster(cab);
-  });
+  aiRoot.position.x += Math.sin(aiRoot.rotation.y) * aiSpeed * dt;
+  aiRoot.position.z += Math.cos(aiRoot.rotation.y) * aiSpeed * dt;
+  aiRoot.position.y = 0;
 
-  // Accent strips on floor (race line markers)
-  const linePositions = [0, -20, -35, 15, 30];
-  linePositions.forEach((z, i) => {
-    const line = BABYLON.MeshBuilder.CreateBox('line' + i, { width: 8, height: 0.01, depth: 0.15 }, scene);
-    line.position.set(0, 0.01, z);
-    line.material = accentMat;
-  });
-
-  // Overhead fluorescent lights
-  for (let z = -36; z <= 36; z += 8) {
-    const light = BABYLON.MeshBuilder.CreateBox('light' + z, { width: 0.2, height: 0.05, depth: 1.2 }, scene);
-    light.position.set(-8, 3.45, z);
-    light.material = mat('light', 1, 1, 0.9, scene, 0, 0.1);
-    const light2 = light.clone('light2' + z);
-    light2.position.set(8, 3.45, z);
-  }
-
-  // Plants as decorations/obstacles
-  const plantMat = mat('plant', 0.15, 0.5, 0.2, scene, 0, 1);
-  const potMat = mat('pot', 0.6, 0.4, 0.3, scene, 0, 0.8);
-  [[-28, -10], [28, 15], [-28, 30], [28, -30]].forEach(([x, z], i) => {
-    const pot = BABYLON.MeshBuilder.CreateCylinder('pot' + i, { height: 0.4, diameterTop: 0.4, diameterBottom: 0.3 }, scene);
-    pot.position.set(x, 0.2, z);
-    pot.material = potMat;
-    const plant = BABYLON.MeshBuilder.CreateSphere('plant' + i, { diameter: 0.8 }, scene);
-    plant.position.set(x, 0.8, z);
-    plant.material = plantMat;
-    trackLayout.push({ type: 'wall', cx: x, cz: z, hw: 0.6, hd: 0.6 });
-  });
-
-  // Start/Finish line
-  const sfMat = mat('sf', 1, 1, 1, scene, 0, 0.5);
-  for (let i = -5; i <= 5; i += 1) {
-    const tile = BABYLON.MeshBuilder.CreateBox('sftile' + i, { width: 0.9, height: 0.01, depth: 1.5 }, scene);
-    tile.position.set(i, 0.01, -30);
-    tile.material = i % 2 === 0 ? sfMat : mat('sfb', 0, 0, 0, scene);
-  }
-
-  // Checkpoints (invisible trigger volumes)
-  const cpPositions = [
-    { x: 0, z: -30, finish: true },
-    { x: -14, z: -10, finish: false },
-    { x: -14, z: 20, finish: false },
-    { x: 0, z: 38, finish: false },
-    { x: 14, z: 20, finish: false },
-    { x: 14, z: -10, finish: false },
-  ];
-
-  cpPositions.forEach((cp, idx) => {
-    const mesh = BABYLON.MeshBuilder.CreateBox('cp' + idx, { width: 10, height: 3, depth: 1 }, scene);
-    mesh.position.set(cp.x, 1.5, cp.z);
-    mesh.isVisible = false;
-    mesh.isPickable = false;
-    checkpointMeshes.push(mesh);
-    registerCheckpoint(mesh, idx, cp.finish);
-  });
-
-  // AI waypoints (match checkpoint path)
-  aiWaypoints = cpPositions.map(cp => new BABYLON.Vector3(cp.x, 0.25, cp.z));
-  aiWaypointIndex = 0;
-
-  // Spawn player and AI
-  spawnChairs(scene, shadowGen, 0, -30, 2, -30);
+  aiLegPhase += Math.abs(aiSpeed) * dt * 2.8;
+  animateLegs(aiLegs, aiLegPhase, aiSpeed);
 }
 
-// ─── TRACK 1: Open Office Chaos ───────────────────────────────────────────────
-function buildOpenOfficeTrack(scene, shadowGen) {
-  trackLayout = [];
-  checkpointMeshes = [];
-  aiWaypoints = [];
-
-  scene.fogColor = new BABYLON.Color3(0.9, 0.92, 0.85);
-  scene.clearColor = new BABYLON.Color4(0.9, 0.92, 0.85, 1);
-
-  const concMat = mat('conc', 0.55, 0.55, 0.52, scene, 0, 0.95);
-  const wallMat = mat('wall', 0.96, 0.96, 0.94, scene, 0, 0.9);
-  const woodMat = mat('wood', 0.55, 0.42, 0.3, scene, 0, 0.8);
-  const glassMat = mat('glass', 0.6, 0.8, 0.9, scene, 0.1, 0.1);
-
-  trackLayout.push({ type: 'bounds', minX: -40, maxX: 40, minZ: -50, maxZ: 50 });
-
-  // Polished concrete floor
-  createFloor('f1', 80, 100, 0, 0, scene, concMat);
-
-  // Outer glass walls (modern open office)
-  createWall('wN', 80, 5, 0.4, 0, 2.5, -50, scene, glassMat);
-  createWall('wS', 80, 5, 0.4, 0, 2.5, 50, scene, glassMat);
-  createWall('wE', 0.4, 5, 100, 0, 2.5, 40, scene, glassMat);
-  createWall('wW', 0.4, 5, 100, 0, 2.5, -40, scene, glassMat);
-
-  // Standing desks cluster – scattered obstacles
-  const deskPositions = [
-    [-20, -35], [20, -35], [-20, -15], [20, -15],
-    [-20, 5], [20, 5], [-20, 25], [20, 25],
-    [0, -25], [0, 15],
-    [-10, -45], [10, -45], [-10, 40], [10, 40],
-  ];
-  deskPositions.forEach(([x, z], i) => {
-    const h = 0.9 + Math.random() * 0.3;
-    const desk = BABYLON.MeshBuilder.CreateBox('sd' + i, { width: 1.6, height: h, depth: 0.7 }, scene);
-    desk.position.set(x, h / 2, z);
-    desk.material = woodMat;
-    shadowGen.addShadowCaster(desk);
-    trackLayout.push({ type: 'wall', cx: x, cz: z, hw: 1.2, hd: 0.8 });
-
-    // Monitor on desk
-    const mon = BABYLON.MeshBuilder.CreateBox('mon' + i, { width: 0.55, height: 0.4, depth: 0.05 }, scene);
-    mon.position.set(x, h + 0.2, z - 0.1);
-    mon.material = mat('mon', 0.05, 0.05, 0.05, scene, 0.6, 0.3);
-  });
-
-  // Whiteboards as dividers
-  const wbMat = mat('wb', 0.97, 0.97, 0.97, scene, 0, 0.5);
-  const wbFrameMat = mat('wbf', 0.2, 0.2, 0.2, scene, 0.5, 0.5);
-  [[-5, -40, true], [5, -5, true], [-5, 35, true], [5, 10, false]].forEach(([x, z, vert], i) => {
-    const wb = BABYLON.MeshBuilder.CreateBox('wb' + i, {
-      width: vert ? 0.1 : 3, height: 1.8, depth: vert ? 3 : 0.1
-    }, scene);
-    wb.position.set(x, 0.9, z);
-    wb.material = wbMat;
-    const frame = BABYLON.MeshBuilder.CreateBox('wbf' + i, {
-      width: vert ? 0.15 : 3.2, height: 1.85, depth: vert ? 3.2 : 0.15
-    }, scene);
-    frame.position.set(x, 0.9, z);
-    frame.material = wbFrameMat;
-    trackLayout.push({ type: 'wall', cx: x, cz: z, hw: vert ? 0.5 : 2, hd: vert ? 2 : 0.5 });
-  });
-
-  // Bean bag / lounge area obstacles
-  const bbMat = mat('bb', 0.8, 0.2, 0.4, scene, 0, 0.9);
-  [[-30, 40], [30, -40], [-30, -20], [30, 20]].forEach(([x, z], i) => {
-    const bb = BABYLON.MeshBuilder.CreateSphere('bb' + i, { diameter: 1.2 }, scene);
-    bb.position.set(x, 0.6, z);
-    bb.material = bbMat;
-    bb.scaling.y = 0.6;
-    trackLayout.push({ type: 'wall', cx: x, cz: z, hw: 0.8, hd: 0.8 });
-  });
-
-  // Exposed ductwork on ceiling
-  const ductMat = mat('duct', 0.5, 0.5, 0.5, scene, 0.7, 0.4);
-  for (let z = -45; z <= 45; z += 10) {
-    const duct = BABYLON.MeshBuilder.CreateBox('duct' + z, { width: 0.6, height: 0.4, depth: 10 }, scene);
-    duct.position.set(-15, 4.2, z);
-    duct.material = ductMat;
-    const duct2 = duct.clone('duct2' + z);
-    duct2.position.set(15, 4.2, z);
-  }
-
-  // Start/finish
-  const sfMat = mat('sf', 1, 1, 1, scene);
-  for (let i = -6; i <= 6; i++) {
-    const t = BABYLON.MeshBuilder.CreateBox('sft' + i, { width: 0.9, height: 0.01, depth: 1.5 }, scene);
-    t.position.set(i, 0.01, -38);
-    t.material = i % 2 === 0 ? sfMat : mat('sfb', 0.1, 0.1, 0.1, scene);
-  }
-
-  // Checkpoints
-  const cpData = [
-    { x: 0, z: -38, finish: true },
-    { x: -28, z: -30, finish: false },
-    { x: -28, z: 0, finish: false },
-    { x: -28, z: 35, finish: false },
-    { x: 0, z: 45, finish: false },
-    { x: 28, z: 35, finish: false },
-    { x: 28, z: 0, finish: false },
-    { x: 28, z: -30, finish: false },
-  ];
-
+// ── Checkpoints ───────────────────────────────────────────────────────────────
+function checkPlayerCheckpoints() {
+  if (!playerRoot) return;
   cpData.forEach((cp, idx) => {
-    const mesh = BABYLON.MeshBuilder.CreateBox('cp' + idx, { width: 12, height: 4, depth: 1 }, scene);
-    mesh.position.set(cp.x, 2, cp.z);
-    mesh.isVisible = false;
-    mesh.isPickable = false;
-    checkpointMeshes.push(mesh);
-    registerCheckpoint(mesh, idx, cp.finish);
+    const d = Math.sqrt((playerRoot.position.x-cp.x)**2 + (playerRoot.position.z-cp.z)**2);
+    if (d < 4.5 && !passedCPs.includes(idx)) {
+      passedCPs.push(idx);
+      playerCP = idx;
+    }
+    if (cp.finish && d < 4.5 && passedCPs.length >= cpData.length) {
+      passedCPs = [];
+      playerLap++;
+      const lt = performance.now() - lapStart;
+      lapStart = performance.now();
+      if (lt < bestLap) { bestLap = lt; document.getElementById('h-best').textContent = fmt(bestLap); }
+      if (playerLap > totalLaps && !raceFinished) finishRace(true);
+    }
   });
-
-  aiWaypoints = cpData.map(cp => new BABYLON.Vector3(cp.x, 0.25, cp.z));
-
-  spawnChairs(scene, shadowGen, 0, -38, 2, -38);
 }
 
-// ─── TRACK 2: Executive Suite ─────────────────────────────────────────────────
-function buildExecutiveSuiteTrack(scene, shadowGen) {
-  trackLayout = [];
-  checkpointMeshes = [];
-  aiWaypoints = [];
-
-  scene.fogColor = new BABYLON.Color3(0.15, 0.12, 0.1);
-  scene.clearColor = new BABYLON.Color4(0.15, 0.12, 0.1, 1);
-  scene.fogStart = 40;
-  scene.fogEnd = 90;
-
-  const mahoganyMat = mat('mah', 0.35, 0.18, 0.1, scene, 0.1, 0.4);
-  const marbleMat = mat('marble', 0.88, 0.86, 0.82, scene, 0.2, 0.3);
-  const goldMat = mat('gold', 0.83, 0.68, 0.21, scene, 0.9, 0.2);
-  const darkWallMat = mat('dwall', 0.22, 0.18, 0.15, scene, 0, 0.7);
-  const carpetMat = mat('carpet', 0.35, 0.25, 0.45, scene, 0, 0.99);
-
-  trackLayout.push({ type: 'bounds', minX: -30, maxX: 30, minZ: -45, maxZ: 45 });
-
-  createFloor('f1', 60, 90, 0, 0, scene, marbleMat);
-
-  // Dark paneled walls
-  createWall('wN', 60, 5, 0.5, 0, 2.5, -45, scene, darkWallMat);
-  createWall('wS', 60, 5, 0.5, 0, 2.5, 45, scene, darkWallMat);
-  createWall('wE', 0.5, 5, 90, 0, 2.5, 30, scene, darkWallMat);
-  createWall('wW', 0.5, 5, 90, 0, 2.5, -30, scene, darkWallMat);
-
-  // Gold trim baseboards
-  [-45, 45].forEach(z => {
-    const trim = BABYLON.MeshBuilder.CreateBox('trimN' + z, { width: 60, height: 0.15, depth: 0.2 }, scene);
-    trim.position.set(0, 0.08, z - (z < 0 ? -0.3 : 0.3));
-    trim.material = goldMat;
-  });
-
-  // Boardroom table (big obstacle)
-  const table = BABYLON.MeshBuilder.CreateBox('btable', { width: 6, height: 0.15, depth: 14 }, scene);
-  table.position.set(0, 0.8, 0);
-  table.material = mahoganyMat;
-  shadowGen.addShadowCaster(table);
-  trackLayout.push({ type: 'wall', cx: 0, cz: 0, hw: 3.5, hd: 7.5 });
-
-  // Boardroom chairs around table
-  const bcMat = mat('bchair', 0.1, 0.08, 0.06, scene, 0.2, 0.7);
-  const chairPositions = [];
-  for (let z = -5; z <= 5; z += 2.5) {
-    chairPositions.push([-4.5, z], [4.5, z]);
-  }
-  chairPositions.push([0, -8.5], [0, 8.5]);
-  chairPositions.forEach(([x, z], i) => {
-    const bc = BABYLON.MeshBuilder.CreateBox('bc' + i, { width: 0.6, height: 1.0, depth: 0.6 }, scene);
-    bc.position.set(x, 0.5, z);
-    bc.material = bcMat;
-    trackLayout.push({ type: 'wall', cx: x, cz: z, hw: 0.5, hd: 0.5 });
-  });
-
-  // Executive desks (side offices)
-  [[-22, -30], [22, -30], [-22, 30], [22, 30]].forEach(([x, z], i) => {
-    const d = BABYLON.MeshBuilder.CreateBox('exdesk' + i, { width: 4, height: 0.8, depth: 2 }, scene);
-    d.position.set(x, 0.4, z);
-    d.material = mahoganyMat;
-    trackLayout.push({ type: 'wall', cx: x, cz: z, hw: 2.5, hd: 1.5 });
-
-    // Trophy on desk
-    const trophy = BABYLON.MeshBuilder.CreateCylinder('trophy' + i, { height: 0.6, diameterTop: 0.15, diameterBottom: 0.25 }, scene);
-    trophy.position.set(x + 1, 1.1, z);
-    trophy.material = goldMat;
-
-    // Nameplate
-    const plate = BABYLON.MeshBuilder.CreateBox('plate' + i, { width: 0.6, height: 0.05, depth: 0.2 }, scene);
-    plate.position.set(x - 0.5, 0.83, z - 0.8);
-    plate.material = goldMat;
-  });
-
-  // Carpet runner down corridor
-  const carpetL = BABYLON.MeshBuilder.CreateBox('carpL', { width: 3, height: 0.01, depth: 60 }, scene);
-  carpetL.position.set(-14, 0.01, 0);
-  carpetL.material = carpetMat;
-  const carpetR = carpetL.clone('carpR');
-  carpetR.position.set(14, 0.01, 0);
-
-  // Pillars
-  const pillarMat = mat('pil', 0.75, 0.72, 0.68, scene, 0.3, 0.4);
-  [[-20, -20], [20, -20], [-20, 20], [20, 20], [-20, 0], [20, 0]].forEach(([x, z], i) => {
-    const pil = BABYLON.MeshBuilder.CreateCylinder('pil' + i, { height: 5, diameter: 0.9 }, scene);
-    pil.position.set(x, 2.5, z);
-    pil.material = pillarMat;
-    shadowGen.addShadowCaster(pil);
-    trackLayout.push({ type: 'wall', cx: x, cz: z, hw: 0.8, hd: 0.8 });
-
-    // Gold cap
-    const cap = BABYLON.MeshBuilder.CreateCylinder('cap' + i, { height: 0.2, diameter: 1.1 }, scene);
-    cap.position.set(x, 5, z);
-    cap.material = goldMat;
-  });
-
-  // Crystal chandeliers
-  const crystalMat = mat('crys', 0.9, 0.95, 1.0, scene, 0.0, 0.0);
-  [[-10, -30], [10, -30], [-10, 30], [10, 30], [0, 0]].forEach(([x, z], i) => {
-    const ch = BABYLON.MeshBuilder.CreateSphere('ch' + i, { diameter: 0.8 }, scene);
-    ch.position.set(x, 4.5, z);
-    ch.material = crystalMat;
-    ch.scaling.y = 1.5;
-    const pl = new BABYLON.PointLight('pl' + i, new BABYLON.Vector3(x, 4, z), scene);
-    pl.intensity = 0.5;
-    pl.diffuse = new BABYLON.Color3(1.0, 0.92, 0.75);
-    pl.range = 15;
-  });
-
-  // Start/finish line
-  const sfMat = mat('sf', 0.9, 0.9, 0.9, scene);
-  for (let i = -4; i <= 4; i++) {
-    const t = BABYLON.MeshBuilder.CreateBox('sft' + i, { width: 0.9, height: 0.01, depth: 1.5 }, scene);
-    t.position.set(i, 0.01, -38);
-    t.material = i % 2 === 0 ? sfMat : goldMat;
-  }
-
-  // Checkpoints – tighter course
-  const cpData = [
-    { x: 0, z: -38, finish: true },
-    { x: -20, z: -35, finish: false },
-    { x: -20, z: -10, finish: false },
-    { x: -20, z: 15, finish: false },
-    { x: -20, z: 38, finish: false },
-    { x: 0, z: 42, finish: false },
-    { x: 20, z: 38, finish: false },
-    { x: 20, z: 15, finish: false },
-    { x: 20, z: -10, finish: false },
-    { x: 20, z: -35, finish: false },
-  ];
-
-  cpData.forEach((cp, idx) => {
-    const mesh = BABYLON.MeshBuilder.CreateBox('cp' + idx, { width: 8, height: 4, depth: 1 }, scene);
-    mesh.position.set(cp.x, 2, cp.z);
-    mesh.isVisible = false;
-    mesh.isPickable = false;
-    checkpointMeshes.push(mesh);
-    registerCheckpoint(mesh, idx, cp.finish);
-  });
-
-  aiWaypoints = cpData.map(cp => new BABYLON.Vector3(cp.x, 0.25, cp.z));
-
-  spawnChairs(scene, shadowGen, 0, -38, 2, -38);
+function finishRace(won) {
+  raceFinished = true; gameRunning = false;
+  const total = performance.now() - raceStart;
+  document.getElementById('fi').textContent    = won ? '🏆' : '😅';
+  document.getElementById('ft').textContent    = won ? 'YOU WIN!' : 'SO CLOSE!';
+  document.getElementById('ftime').textContent = 'Total: ' + fmt(total);
+  document.getElementById('fin').style.display = 'flex';
 }
 
-// ─── Spawn chairs ────────────────────────────────────────────────────────────
-function spawnChairs(scene, shadowGen, px, pz, ax, az) {
-  // Player chair (blue)
-  playerChair = createChairMesh('player', scene, { r: 0.15, g: 0.4, b: 0.85 });
-  playerChair.position.set(px - 1.5, 0.25, pz);
-  playerChair.rotation.y = 0;
+// ── HUD ───────────────────────────────────────────────────────────────────────
+function updateHUD(ms, lap) {
+  document.getElementById('h-time').textContent = fmt(ms);
+  document.getElementById('h-lap').textContent  = Math.min(lap,totalLaps)+' / '+totalLaps;
+  const kmh = Math.abs(Math.round(playerSpeed * 3.6));
+  document.getElementById('sn').textContent = kmh + ' km/h';
+  document.getElementById('sf').style.width = Math.min(kmh/62*100,100)+'%';
+}
+function updatePosition() {
+  const pp = (playerLap-1)*200 + playerCP;
+  const ap = (aiLap-1)*200 + aiWPIdx;
+  document.getElementById('pos-n').textContent = pp >= ap ? '1' : '2';
+}
+function fmt(ms) {
+  if (!ms || ms===Infinity) return '--:--.--';
+  const m=Math.floor(ms/60000), s=Math.floor((ms%60000)/1000), c=Math.floor((ms%1000)/10);
+  return `${m}:${String(s).padStart(2,'0')}.${String(c).padStart(2,'0')}`;
+}
 
-  // AI chair (red/orange)
-  aiChair = createChairMesh('ai', scene, { r: 0.9, g: 0.3, b: 0.1 });
-  aiChair.position.set(ax + 1.5, 0.25, az);
-  aiChair.rotation.y = 0;
+// ── Minimap ───────────────────────────────────────────────────────────────────
+function drawMinimap() {
+  if (!mmCtx || !playerRoot) return;
+  const W=150, H=150, ctx=mmCtx;
+  ctx.fillStyle='#111'; ctx.fillRect(0,0,W,H);
 
-  // Shadows for all child meshes
-  [playerChair, aiChair].forEach(root => {
-    scene.meshes.forEach(m => {
-      if (m.parent === root) {
-        shadowGen.addShadowCaster(m);
-        m.receiveShadows = true;
-      }
+  const sc=2.2, ox=W/2, oy=H/2;
+  ctx.strokeStyle='#2a2a3a'; ctx.lineWidth=6;
+  if (trackCenterLine.length>1) {
+    ctx.beginPath();
+    trackCenterLine.forEach((p,i) => {
+      const x=ox+p.x*sc/4, y=oy+p.z*sc/4;
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    });
+    ctx.closePath(); ctx.stroke();
+  }
+
+  if (aiRoot) {
+    ctx.fillStyle='#ff6b35';
+    ctx.beginPath(); ctx.arc(ox+aiRoot.position.x*sc/4, oy+aiRoot.position.z*sc/4, 4,0,Math.PI*2); ctx.fill();
+  }
+  ctx.fillStyle='#00d4ff';
+  ctx.beginPath(); ctx.arc(ox+playerRoot.position.x*sc/4, oy+playerRoot.position.z*sc/4, 5,0,Math.PI*2); ctx.fill();
+}
+
+// ── Box helpers ───────────────────────────────────────────────────────────────
+function box(w,h,d, x,y,z, mat, scene) {
+  const b = BABYLON.MeshBuilder.CreateBox('b'+Math.random(),{width:w,height:h,depth:d},scene);
+  b.position.set(x,y,z); b.material=mat; b.receiveShadows=true; return b;
+}
+function cyl(h,dia, x,y,z, mat, scene) {
+  const c = BABYLON.MeshBuilder.CreateCylinder('c'+Math.random(),{height:h,diameter:dia},scene);
+  c.position.set(x,y,z); c.material=mat; c.receiveShadows=true; return c;
+}
+function sph(dia, x,y,z, mat, scene) {
+  const s = BABYLON.MeshBuilder.CreateSphere('s'+Math.random(),{diameter:dia},scene);
+  s.position.set(x,y,z); s.material=mat; return s;
+}
+
+// ── Spawn utility ─────────────────────────────────────────────────────────────
+function spawnRacers(scene, sx, sz, shadows) {
+  const pw = scene._options && scene._options.playerColor || [0.1,0.3,0.8];
+  const aw = [0.8,0.2,0.1];
+
+  // Player – blue chair, white shirt
+  const p = createWorkerChair('P', scene, [0.12,0.28,0.82], [0.9,0.9,0.9]);
+  playerRoot = p.root; playerLegs = p.refs;
+  playerRoot.position.set(sx-1.8, 0, sz);
+
+  // AI – red chair, yellow shirt
+  const a = createWorkerChair('A', scene, [0.78,0.12,0.08], [0.9,0.75,0.1]);
+  aiRoot = a.root; aiLegs = a.refs;
+  aiRoot.position.set(sx+1.8, 0, sz);
+
+  // Cast shadows for all child meshes
+  [playerRoot, aiRoot].forEach(root => {
+    scene.meshes.filter(m=>m.parent===root||m.parent?.parent===root).forEach(m=>{
+      shadows.addShadowCaster(m, true);
     });
   });
 
-  camera.lockedTarget = playerChair;
+  camera.lockedTarget = playerRoot;
+}
+
+// ── Start/Finish line ─────────────────────────────────────────────────────────
+function startFinishLine(cx, cz, angle, scene) {
+  const w1 = pbr(1,1,1,0,0.6,scene), w2 = pbr(0.05,0.05,0.05,0,0.6,scene);
+  for (let i=-4; i<=4; i++) {
+    const t = BABYLON.MeshBuilder.CreateBox('sf'+i,{width:0.85,height:0.01,depth:1.6},scene);
+    t.position.set(cx + Math.sin(angle+Math.PI/2)*i, 0.02, cz + Math.cos(angle+Math.PI/2)*i);
+    t.rotation.y = angle;
+    t.material = i%2===0 ? w1 : w2;
+  }
+}
+
+// ── Fluorescent ceiling light ─────────────────────────────────────────────────
+function fluorescentLight(x,z,scene) {
+  const fix = BABYLON.MeshBuilder.CreateBox('fl'+x+z,{width:0.18,height:0.04,depth:1.4},scene);
+  fix.position.set(x, 3.18, z);
+  const mat = pbr(1,1,0.9,0,0.05,scene); fix.material=mat;
+  const pl = new BABYLON.PointLight('pl'+x+z, new BABYLON.Vector3(x,3,z), scene);
+  pl.intensity=0.55; pl.range=9;
+  pl.diffuse = new BABYLON.Color3(1,0.97,0.88);
+}
+
+// ── Desk with monitor ─────────────────────────────────────────────────────────
+function officeDesk(x,z,ry,scene) {
+  const wood  = pbr(0.55,0.42,0.3, 0.05,0.75,scene);
+  const metal = pbr(0.6,0.6,0.6,   0.8, 0.3, scene);
+  const black = pbr(0.07,0.07,0.09, 0.5,0.4, scene);
+  const screen= pbr(0.05,0.35,0.55, 0,  0.1, scene);
+
+  const g = new BABYLON.TransformNode('desk'+x+z, scene);
+  g.position.set(x,0,z); g.rotation.y=ry;
+
+  const top = BABYLON.MeshBuilder.CreateBox('dt',{width:1.6,height:0.05,depth:0.8},scene); top.parent=g; top.position.y=0.78; top.material=wood;
+  [-0.7,0.7,-0.7,0.7].forEach((lx,i)=>{
+    const lz=i<2?0.35:-0.35;
+    const leg=BABYLON.MeshBuilder.CreateBox('dl'+i,{width:0.05,height:0.78,depth:0.05},scene); leg.parent=g; leg.position.set(lx,0.39,lz); leg.material=metal;
+  });
+  // Monitor
+  const mon=BABYLON.MeshBuilder.CreateBox('mon',{width:0.6,height:0.42,depth:0.04},scene); mon.parent=g; mon.position.set(0,1.08,-0.12); mon.material=black;
+  const scr=BABYLON.MeshBuilder.CreateBox('scr',{width:0.54,height:0.36,depth:0.01},scene); scr.parent=g; scr.position.set(0,1.08,-0.11); scr.material=screen;
+  const stand=BABYLON.MeshBuilder.CreateBox('mst',{width:0.06,height:0.18,depth:0.06},scene); stand.parent=g; stand.position.set(0,0.87,-0.12); stand.material=black;
+  // Keyboard
+  const kb=BABYLON.MeshBuilder.CreateBox('kb',{width:0.42,height:0.02,depth:0.16},scene); kb.parent=g; kb.position.set(0,0.82,0.12); kb.material=black;
+  // Coffee mug
+  const mug=BABYLON.MeshBuilder.CreateCylinder('mug',{height:0.12,diameter:0.08},scene); mug.parent=g; mug.position.set(0.55,0.84,0.1); mug.material=pbr(0.7,0.2,0.2,0,0.8,scene);
+}
+
+// ── Cubicle wall panel ────────────────────────────────────────────────────────
+function cubicleWall(x,z,w,ry,scene) {
+  const frame = pbr(0.55,0.5,0.45, 0.1,0.8,scene);
+  const fabric= pbr(0.45,0.48,0.52, 0,0.95,scene);
+  const g=new BABYLON.TransformNode('cw'+x+z,scene); g.position.set(x,0,z); g.rotation.y=ry;
+  const panel=BABYLON.MeshBuilder.CreateBox('cp',{width:w,height:1.55,depth:0.08},scene); panel.parent=g; panel.position.y=0.78; panel.material=fabric;
+  const ft=BABYLON.MeshBuilder.CreateBox('ft',{width:w,height:0.06,depth:0.09},scene); ft.parent=g; ft.position.y=1.58; ft.material=frame;
+  const fb=BABYLON.MeshBuilder.CreateBox('fb',{width:w,height:0.06,depth:0.09},scene); fb.parent=g; fb.position.y=0.03; fb.material=frame;
+  [-w/2,w/2].forEach((px,i)=>{
+    const fe=BABYLON.MeshBuilder.CreateBox('fe'+i,{width:0.06,height:1.6,depth:0.09},scene); fe.parent=g; fe.position.set(px,0.8,0); fe.material=frame;
+  });
+}
+
+// ── Potted plant ──────────────────────────────────────────────────────────────
+function plant(x,z,scene) {
+  const pot=BABYLON.MeshBuilder.CreateCylinder('pot'+x,{height:0.32,diameterTop:0.28,diameterBottom:0.22},scene);
+  pot.position.set(x,0.16,z); pot.material=pbr(0.55,0.35,0.22,0,0.9,scene);
+  const leaves=BABYLON.MeshBuilder.CreateSphere('lv'+x,{diameter:0.65},scene);
+  leaves.position.set(x,0.68,z); leaves.material=pbr(0.15,0.5,0.2,0,0.9,scene); leaves.scaling.y=1.2;
+}
+
+// ── Filing cabinet ────────────────────────────────────────────────────────────
+function cabinet(x,z,ry,scene) {
+  const mat=pbr(0.45,0.52,0.58,0.4,0.5,scene);
+  const b=BABYLON.MeshBuilder.CreateBox('cab'+x,{width:0.46,height:1.1,depth:0.6},scene);
+  b.position.set(x,0.55,z); b.rotation.y=ry; b.material=mat;
+  [-0.22,0.22].forEach((dy,i)=>{
+    const h=BABYLON.MeshBuilder.CreateBox('ch'+i+x,{width:0.12,height:0.02,depth:0.06},scene);
+    h.position.set(x,0.55+dy,z-0.32+Math.cos(ry)*0.31); h.material=pbr(0.7,0.68,0.2,0.9,0.2,scene);
+  });
+}
+
+// ── Water cooler ─────────────────────────────────────────────────────────────
+function waterCooler(x,z,scene) {
+  const body=BABYLON.MeshBuilder.CreateBox('wc'+x,{width:0.38,height:1.0,depth:0.38},scene); body.position.set(x,0.5,z); body.material=pbr(0.92,0.92,0.92,0.1,0.6,scene);
+  const bottle=BABYLON.MeshBuilder.CreateCylinder('wb'+x,{height:0.55,diameter:0.28},scene); bottle.position.set(x,1.28,z); bottle.material=pbr(0.6,0.82,0.9,0.05,0.15,scene);
+}
+
+// ── Office floor tiles ────────────────────────────────────────────────────────
+function officeTiles(w,d,cx,cz,scene,col) {
+  const mat=pbr(...col,0.05,0.35,scene);
+  const floor=BABYLON.MeshBuilder.CreateBox('offl',{width:w,height:0.08,depth:d},scene);
+  floor.position.set(cx,-0.04,cz); floor.material=mat; floor.receiveShadows=true;
+  return floor;
+}
+
+// ── Suspended ceiling ─────────────────────────────────────────────────────────
+function suspendedCeiling(w,d,cx,cz,h,scene) {
+  const ceil=BABYLON.MeshBuilder.CreateBox('ceil',{width:w,height:0.15,depth:d},scene);
+  ceil.position.set(cx,h+0.075,cz);
+  ceil.material=pbr(0.94,0.94,0.92,0,0.95,scene);
+  // Grid lines
+  for (let x=cx-w/2; x<cx+w/2; x+=2) {
+    const gl=BABYLON.MeshBuilder.CreateBox('cgl'+x,{width:0.05,height:0.1,depth:d},scene);
+    gl.position.set(x,h+0.04,cz); gl.material=pbr(0.75,0.75,0.75,0.5,0.6,scene);
+  }
+  for (let z=cz-d/2; z<cz+d/2; z+=2) {
+    const gl=BABYLON.MeshBuilder.CreateBox('cgz'+z,{width:w,height:0.1,depth:0.05},scene);
+    gl.position.set(cx,h+0.04,z); gl.material=pbr(0.75,0.75,0.75,0.5,0.6,scene);
+  }
+}
+
+// ── Outer walls ───────────────────────────────────────────────────────────────
+function outerWalls(minX,maxX,minZ,maxZ,h,scene,wallMat,windowMat) {
+  const W=maxX-minX, D=maxZ-minZ;
+  // N/S walls with windows
+  [[0,minZ,W],[0,maxZ,W]].forEach(([x,z,w],si)=>{
+    const wall=BABYLON.MeshBuilder.CreateBox('ow'+si,{width:w,height:h,depth:0.3},scene);
+    wall.position.set(x,h/2,z); wall.material=wallMat; wall.receiveShadows=true;
+    // Window panels
+    for (let wx=minX+3; wx<maxX-2; wx+=5) {
+      const win=BABYLON.MeshBuilder.CreateBox('win'+si+wx,{width:3,height:h*0.55,depth:0.05},scene);
+      win.position.set(wx,h*0.55,z+(si===0?0.16:-0.16)); win.material=windowMat;
+    }
+  });
+  // E/W walls
+  [[minX,0,D],[maxX,0,D]].forEach(([x,z,d],si)=>{
+    const wall=BABYLON.MeshBuilder.CreateBox('ow2'+si,{width:0.3,height:h,depth:d},scene);
+    wall.position.set(x,h/2,z); wall.material=wallMat;
+  });
+}
+
+// ── Baseboard trim ────────────────────────────────────────────────────────────
+function baseboard(minX,maxX,minZ,maxZ,scene,mat) {
+  const W=maxX-minX, D=maxZ-minZ;
+  [[0,minZ,W,true],[0,maxZ,W,true],[minX,0,D,false],[maxX,0,D,false]].forEach(([x,z,l,horiz])=>{
+    const b=BABYLON.MeshBuilder.CreateBox('bb'+x+z,horiz?{width:l,height:0.12,depth:0.06}:{width:0.06,height:0.12,depth:l},scene);
+    b.position.set(x,0.06,z); b.material=mat;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRACK 0 – CUBICLE CANYON
+// ═══════════════════════════════════════════════════════════════════════════════
+function buildCubicleCanyon(scene, shadows) {
+  scene.fogColor = new BABYLON.Color3(0.87,0.9,0.88);
+  scene.clearColor= new BABYLON.Color4(0.87,0.9,0.88,1);
+
+  const wallMat= pbr(0.9,0.9,0.88,0,0.85,scene);
+  const winMat = pbr(0.55,0.75,0.88,0.05,0.08,scene);
+  const carpMat= pbr(0.42,0.46,0.5,0,0.99,scene);
+
+  // Room
+  officeTiles(80,84, 0,0, scene,[0.88,0.88,0.86]);
+  suspendedCeiling(80,84, 0,0, 3.2,scene);
+  outerWalls(-40,40,-42,42, 3.2,scene,wallMat,winMat);
+  baseboard(-40,40,-42,42,scene,pbr(0.72,0.68,0.6,0,0.8,scene));
+
+  // Carpet runner in office areas
+  const carp=BABYLON.MeshBuilder.CreateBox('carp',{width:10,height:0.01,depth:84},scene);
+  carp.position.set(0,0.01,0); carp.material=carpMat;
+
+  // Lights grid
+  for (let x=-24; x<=24; x+=12) for (let z=-36; z<=36; z+=8) fluorescentLight(x,z,scene);
+
+  // ── Track (Mario-Kart loop around cubicle rows) ──
+  const rawPts = [
+    new BABYLON.Vector3(0,0,-36),
+    new BABYLON.Vector3(-28,0,-30),
+    new BABYLON.Vector3(-30,0,-10),
+    new BABYLON.Vector3(-30,0,10),
+    new BABYLON.Vector3(-28,0,30),
+    new BABYLON.Vector3(0,0,36),
+    new BABYLON.Vector3(28,0,30),
+    new BABYLON.Vector3(30,0,10),
+    new BABYLON.Vector3(30,0,-10),
+    new BABYLON.Vector3(28,0,-30),
+  ];
+  buildRoad(rawPts, 8, scene);
+  startFinishLine(0,-36,0,scene);
+
+  // Checkpoints at each raw waypoint
+  cpData = rawPts.map((p,i)=>({x:p.x,z:p.z,finish:i===0}));
+
+  // ── Office furniture (outside track) ──
+  // Left cubicle farm
+  for (let row=0; row<3; row++) {
+    for (let col=0; col<5; col++) {
+      const cx=-12-row*6, cz=-20+col*10;
+      cubicleWall(cx+1,cz, 3.5, 0, scene);
+      cubicleWall(cx,cz+1.75, 3.5, Math.PI/2, scene);
+      officeDesk(cx-0.5,cz, 0, scene);
+    }
+  }
+  // Right cubicle farm
+  for (let row=0; row<3; row++) {
+    for (let col=0; col<5; col++) {
+      const cx=12+row*6, cz=-20+col*10;
+      cubicleWall(cx-1,cz, 3.5, 0, scene);
+      cubicleWall(cx,cz+1.75, 3.5, Math.PI/2, scene);
+      officeDesk(cx+0.5,cz, 0, scene);
+    }
+  }
+
+  // Plants, cabinets, coolers dotted around
+  [[-36,-38],[36,-38],[-36,38],[36,38],[-36,0],[36,0]].forEach(([x,z])=>plant(x,z,scene));
+  [[-35,-25],[35,-25],[-35,25],[35,25]].forEach(([x,z])=>cabinet(x,z,0,scene));
+  [[-38,10],[38,-10]].forEach(([x,z])=>waterCooler(x,z,scene));
+
+  // Motivational poster on N wall
+  const poster=BABYLON.MeshBuilder.CreateBox('poster',{width:1.8,height:1.2,depth:0.03},scene);
+  poster.position.set(-8,1.8,-41.8);
+  poster.material=pbr(0.2,0.45,0.75,0,0.7,scene);
+
+  spawnRacers(scene, 0, -34, shadows);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRACK 1 – OPEN OFFICE CHAOS
+// ═══════════════════════════════════════════════════════════════════════════════
+function buildOpenOffice(scene, shadows) {
+  scene.fogColor = new BABYLON.Color3(0.9,0.92,0.88);
+  scene.clearColor= new BABYLON.Color4(0.9,0.92,0.88,1);
+
+  const conc  = pbr(0.52,0.52,0.5, 0,0.95,scene);
+  const wallM = pbr(0.96,0.95,0.92,0,0.88,scene);
+  const glass = pbr(0.6,0.8,0.9,0.05,0.08,scene);
+
+  // Room (bigger, open)
+  officeTiles(90,100,0,0,scene,[0.52,0.52,0.5]);
+  suspendedCeiling(90,100,0,0, 3.8,scene);
+  outerWalls(-45,45,-50,50,3.8,scene,wallM,glass);
+  baseboard(-45,45,-50,50,scene,pbr(0.7,0.68,0.62,0,0.8,scene));
+
+  // Exposed duct runs on ceiling
+  for (let z=-45; z<=45; z+=12) {
+    const duct=BABYLON.MeshBuilder.CreateBox('duct'+z,{width:0.7,height:0.45,depth:90},scene);
+    duct.position.set(-16,3.6,z); duct.material=pbr(0.45,0.45,0.47,0.6,0.4,scene);
+    const d2=duct.clone('d2'+z); d2.position.x=16;
+  }
+
+  for (let x=-36; x<=36; x+=9) for (let z=-44; z<=44; z+=9) fluorescentLight(x,z,scene);
+
+  // Snaking track through open space
+  const rawPts = [
+    new BABYLON.Vector3(0,0,-44),
+    new BABYLON.Vector3(-32,0,-38),
+    new BABYLON.Vector3(-38,0,-20),
+    new BABYLON.Vector3(-32,0,0),
+    new BABYLON.Vector3(-38,0,20),
+    new BABYLON.Vector3(-30,0,40),
+    new BABYLON.Vector3(0,0,44),
+    new BABYLON.Vector3(30,0,40),
+    new BABYLON.Vector3(38,0,20),
+    new BABYLON.Vector3(32,0,0),
+    new BABYLON.Vector3(38,0,-20),
+    new BABYLON.Vector3(32,0,-38),
+  ];
+  buildRoad(rawPts, 9, scene);
+  startFinishLine(0,-44,0,scene);
+  cpData = rawPts.map((p,i)=>({x:p.x,z:p.z,finish:i===0}));
+
+  // Standing desk clusters (beside track, not blocking)
+  const deskPos=[[-18,-30],[18,-30],[-18,-10],[18,-10],[-18,10],[18,10],[-18,28],[18,28],[0,-18],[0,18],[0,0]];
+  deskPos.forEach(([x,z])=>officeDesk(x,z,Math.random()*Math.PI*2,scene));
+
+  // Whiteboards as scenic dividers
+  const wbMat=pbr(0.97,0.97,0.96,0,0.5,scene);
+  [[-6,-36,true],[6,10,true],[-6,28,false],[8,-15,false]].forEach(([x,z,vert],i)=>{
+    const wb=BABYLON.MeshBuilder.CreateBox('wb'+i,{width:vert?0.08:3,height:1.8,depth:vert?3:0.08},scene);
+    wb.position.set(x,0.9,z); wb.material=wbMat;
+    const frame=BABYLON.MeshBuilder.CreateBox('wbf'+i,{width:vert?0.12:3.2,height:1.85,depth:vert?3.2:0.12},scene);
+    frame.position.set(x,0.9,z); frame.material=pbr(0.15,0.15,0.15,0.5,0.5,scene);
+  });
+
+  // Bean bags
+  const bb=pbr(0.78,0.22,0.45,0,0.9,scene);
+  [[-40,35],[40,-35],[-40,-35],[40,35]].forEach(([x,z])=>{
+    const bag=BABYLON.MeshBuilder.CreateSphere('bb'+x,{diameter:1.1},scene); bag.position.set(x,0.55,z); bag.material=bb; bag.scaling.y=0.7;
+  });
+
+  [[-42,-42],[42,-42],[-42,42],[42,42],[-42,0],[42,0]].forEach(([x,z])=>plant(x,z,scene));
+  waterCooler(-42,20,scene); waterCooler(42,-20,scene);
+
+  spawnRacers(scene, 0,-42, shadows);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRACK 2 – EXECUTIVE SUITE
+// ═══════════════════════════════════════════════════════════════════════════════
+function buildExecutiveSuite(scene, shadows) {
+  scene.fogColor = new BABYLON.Color3(0.14,0.11,0.09);
+  scene.clearColor= new BABYLON.Color4(0.12,0.09,0.07,1);
+  scene.fogStart=35; scene.fogEnd=80;
+
+  const marble = pbr(0.86,0.83,0.78,0.25,0.28,scene);
+  const mah    = pbr(0.32,0.16,0.08,0.1, 0.4, scene);
+  const gold   = pbr(0.83,0.67,0.2, 0.95,0.18,scene);
+  const darkW  = pbr(0.2, 0.16,0.12,0,   0.75,scene);
+  const glass  = pbr(0.5, 0.72,0.84,0.1, 0.06,scene);
+  const carp   = pbr(0.32,0.22,0.42,0,   0.99,scene);
+
+  officeTiles(62,92, 0,0, scene, [0.84,0.81,0.76]);
+  suspendedCeiling(62,92, 0,0, 4.0, scene);
+  outerWalls(-31,31,-46,46, 4.0, scene, darkW, glass);
+
+  // Gold trim
+  const trimMat=gold;
+  [-31,31].forEach(x=>{
+    const v=BABYLON.MeshBuilder.CreateBox('vt'+x,{width:0.12,height:4,depth:92},scene); v.position.set(x,2,0); v.material=trimMat;
+  });
+  [-46,46].forEach(z=>{
+    const h=BABYLON.MeshBuilder.CreateBox('ht'+z,{width:62,height:0.12,depth:0.18},scene); h.position.set(0,0.06,z); h.material=trimMat;
+    const ht2=h.clone('ht2'+z); ht2.position.y=3.88;
+  });
+
+  // Carpet runner
+  const runner=BABYLON.MeshBuilder.CreateBox('runner',{width:4,height:0.01,depth:92},scene);
+  runner.position.set(0,0.01,0); runner.material=carp;
+
+  // Chandeliers
+  [[0,-30],[0,0],[0,30]].forEach(([x,z])=>{
+    const chain=BABYLON.MeshBuilder.CreateCylinder('chain'+z,{height:1.2,diameter:0.03},scene);
+    chain.position.set(x,3.4,z); chain.material=gold;
+    const bowl=BABYLON.MeshBuilder.CreateSphere('bowl'+z,{diameter:1.0},scene);
+    bowl.position.set(x,2.7,z); bowl.material=pbr(0.88,0.92,0.98,0.1,0.05,scene); bowl.scaling.y=0.5;
+    const pl=new BABYLON.PointLight('cpl'+z,new BABYLON.Vector3(x,2.5,z),scene);
+    pl.intensity=1.2; pl.range=18; pl.diffuse=new BABYLON.Color3(1,0.9,0.72);
+  });
+
+  // Marble pillars lining the room
+  [[-22,-36],[-22,-18],[-22,0],[-22,18],[-22,36],[22,-36],[22,-18],[22,0],[22,18],[22,36]].forEach(([x,z])=>{
+    const p=BABYLON.MeshBuilder.CreateCylinder('pil'+x+z,{height:4,diameter:1.1},scene);
+    p.position.set(x,2,z); p.material=marble;
+    const cap=BABYLON.MeshBuilder.CreateCylinder('cap'+x+z,{height:0.2,diameter:1.3},scene);
+    cap.position.set(x,4.1,z); cap.material=gold;
+    const base=cap.clone('base'+x+z); base.position.y=0.1;
+    shadows.addShadowCaster(p,true);
+  });
+
+  // Boardroom table
+  const bt=BABYLON.MeshBuilder.CreateBox('bt',{width:5.5,height:0.12,depth:12},scene);
+  bt.position.set(0,0.82,0); bt.material=mah;
+  shadows.addShadowCaster(bt,true);
+  // Table legs
+  [[-2.4,-5.2],[-2.4,5.2],[2.4,-5.2],[2.4,5.2]].forEach(([x,z])=>{
+    const tl=BABYLON.MeshBuilder.CreateCylinder('tl'+x,{height:0.82,diameter:0.25},scene);
+    tl.position.set(x,0.41,z); tl.material=mah;
+  });
+
+  // Boardroom chairs around table
+  const bcMat=pbr(0.08,0.06,0.05,0.2,0.7,scene);
+  for (let z=-4.5; z<=4.5; z+=2) {
+    [[-3.8,z],[3.8,z]].forEach(([x,zz])=>{
+      const bc=BABYLON.MeshBuilder.CreateBox('bc'+x+zz,{width:0.55,height:0.08,depth:0.55},scene);
+      bc.position.set(x,0.9,zz); bc.material=bcMat;
+      const bcb=BABYLON.MeshBuilder.CreateBox('bcb'+x+zz,{width:0.52,height:0.7,depth:0.08},scene);
+      bcb.position.set(x,1.25,zz-(x<0?-0.25:0.25)); bcb.material=bcMat;
+    });
+  }
+
+  // Executive desks in side alcoves
+  [[-27,-38],[27,-38],[-27,38],[27,38]].forEach(([x,z],i)=>{
+    officeDesk(x,z,x<0?Math.PI/2:-Math.PI/2,scene);
+    // Trophy
+    const tr=BABYLON.MeshBuilder.CreateCylinder('tr'+i,{height:0.55,diameterTop:0.1,diameterBottom:0.2},scene);
+    tr.position.set(x+0.5,1.1,z); tr.material=gold;
+  });
+
+  // Narrow winding track with tight corners
+  const rawPts = [
+    new BABYLON.Vector3(0,0,-40),
+    new BABYLON.Vector3(-18,0,-38),
+    new BABYLON.Vector3(-20,0,-24),
+    new BABYLON.Vector3(-18,0,-10),
+    new BABYLON.Vector3(-20,0,5),
+    new BABYLON.Vector3(-18,0,20),
+    new BABYLON.Vector3(-20,0,35),
+    new BABYLON.Vector3(0,0,40),
+    new BABYLON.Vector3(20,0,35),
+    new BABYLON.Vector3(18,0,20),
+    new BABYLON.Vector3(20,0,5),
+    new BABYLON.Vector3(18,0,-10),
+    new BABYLON.Vector3(20,0,-24),
+    new BABYLON.Vector3(18,0,-38),
+  ];
+  buildRoad(rawPts, 7, scene);
+  startFinishLine(0,-40,0,scene);
+  cpData = rawPts.map((p,i)=>({x:p.x,z:p.z,finish:i===0}));
+
+  [[-28,0],[28,0],[-28,-20],[28,20]].forEach(([x,z])=>plant(x,z,scene));
+  waterCooler(-28,15,scene);
+
+  spawnRacers(scene, 0, -38, shadows);
 }

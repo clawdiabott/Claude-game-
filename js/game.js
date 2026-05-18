@@ -92,19 +92,39 @@ function initScene() {
   const shadows = new BABYLON.ShadowGenerator(2048, dir);
   shadows.useBlurExponentialShadowMap = true;
 
-  // Follow camera – low angle like Mario Kart, high enough to see over furniture
+  // Follow camera – behind and above player, well below ceiling
   camera = new BABYLON.FollowCamera('cam', new BABYLON.Vector3(0, 4, -14), scene);
   camera.radius = 13;
-  camera.heightOffset = 4.5;
+  camera.heightOffset = 4.2;
   camera.rotationOffset = 180;
   camera.cameraAcceleration = 0.06;
   camera.maxCameraSpeed = 22;
+  camera.maxZ = 300;
   camera.fov = 1.05;
 
   mmCtx = document.getElementById('mm').getContext('2d');
 
   const tracks = [buildCubicleCanyon, buildOpenOffice, buildExecutiveSuite];
   tracks[currentTrack](scene, shadows);
+
+  // Post-processing: bloom + contrast + slight vignette
+  if (BABYLON.DefaultRenderingPipeline) {
+    const pipeline = new BABYLON.DefaultRenderingPipeline('pp', true, scene, [camera]);
+    pipeline.bloomEnabled = true;
+    pipeline.bloomThreshold = 0.72;
+    pipeline.bloomWeight = 0.28;
+    pipeline.bloomKernel = 64;
+    pipeline.bloomScale = 0.5;
+    pipeline.imageProcessingEnabled = true;
+    pipeline.imageProcessing.contrast = 1.18;
+    pipeline.imageProcessing.exposure = 1.05;
+    pipeline.imageProcessing.vignetteEnabled = true;
+    pipeline.imageProcessing.vignetteWeight = 2.2;
+    pipeline.imageProcessing.vignetteColor = new BABYLON.Color4(0,0,0,0);
+    pipeline.imageProcessing.toneMappingEnabled = true;
+    pipeline.fxaaEnabled = true;
+    pipeline.samples = 4;
+  }
 
   showHUD();
   updateHUD(0,1);
@@ -851,28 +871,17 @@ function officeTiles(w,d,cx,cz,scene,col) {
   return floor;
 }
 
-// ── Suspended ceiling – always at 7 units, never clips camera ────────────────
+// ── Ceiling tee-bar grid only – no solid panel, camera never blocked ─────────
 function suspendedCeiling(w,d,cx,cz,scene) {
-  const h = 7.0;
-  const ceilMat = pbr(0.93,0.93,0.91,0,0.97,scene);
-  const gridMat = pbr(0.72,0.72,0.70,0.3,0.65,scene);
-  const ceil=BABYLON.MeshBuilder.CreateBox('ceil',{width:w,height:0.18,depth:d},scene);
-  ceil.position.set(cx,h,cz); ceil.material=ceilMat;
-  // 2x2 grid of tiles
-  for (let x=cx-w/2+1; x<cx+w/2; x+=2) {
-    const gl=BABYLON.MeshBuilder.CreateBox('cglx'+x,{width:0.04,height:0.14,depth:d},scene);
-    gl.position.set(x,h-0.04,cz); gl.material=gridMat;
+  const h = 7.2;
+  const gridMat = pbr(0.62,0.62,0.60,0.3,0.65,scene);
+  for (let x=cx-w/2+2; x<cx+w/2; x+=4) {
+    const gl=BABYLON.MeshBuilder.CreateBox('cglx'+x+cx,{width:0.05,height:0.1,depth:d},scene);
+    gl.position.set(x,h,cz); gl.material=gridMat;
   }
-  for (let z=cz-d/2+1; z<cz+d/2; z+=2) {
-    const gl=BABYLON.MeshBuilder.CreateBox('cglz'+z,{width:w,height:0.14,depth:0.04},scene);
-    gl.position.set(cx,h-0.04,z); gl.material=gridMat;
-  }
-  // Sprinkler heads
-  for (let x=cx-w/2+3; x<cx+w/2; x+=6) {
-    for (let z=cz-d/2+3; z<cz+d/2; z+=6) {
-      const sp=BABYLON.MeshBuilder.CreateCylinder('sp'+x+z,{height:0.06,diameter:0.08},scene);
-      sp.position.set(x,h-0.12,z); sp.material=pbr(0.7,0.1,0.1,0.5,0.4,scene);
-    }
+  for (let z=cz-d/2+2; z<cz+d/2; z+=4) {
+    const gl=BABYLON.MeshBuilder.CreateBox('cglz'+z+cx,{width:w,height:0.1,depth:0.05},scene);
+    gl.position.set(cx,h,z); gl.material=gridMat;
   }
 }
 

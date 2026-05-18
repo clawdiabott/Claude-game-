@@ -4,7 +4,7 @@
 | Tool | Version | Download |
 |---|---|---|
 | Unity Hub | Latest | unityhub://download |
-| Unity Editor | **2022.3.21f1 LTS** | Via Unity Hub |
+| Unity Editor | **Unity 6 LTS (6000.0.x)** | Via Unity Hub → LTS tab |
 | WebGL Build Support | (module) | Install alongside Unity |
 
 ---
@@ -12,8 +12,8 @@
 ## Step 1 – Install Unity Hub + Editor
 
 1. Go to **https://unity.com/download** → Download Unity Hub
-2. Open Unity Hub → **Installs** tab → **Install Editor**
-3. Search for **2022.3.21f1** (use the Archive tab if not listed)
+2. Open Unity Hub → **Installs** tab → **Install Editor** → click the **LTS** filter
+3. Click the **LTS** tab → select **Unity 6 (6000.0.x)** — pick the highest 6000.0.x number shown
 4. On the modules screen, tick:
    - ✅ **WebGL Build Support**
    - ✅ **Windows Build Support** (optional, for desktop testing)

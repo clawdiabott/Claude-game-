@@ -22,6 +22,21 @@ public static class SceneBuilder
     [MenuItem("ChairGP/Build Scene/Track 2 – Executive Suite")]
     static void BuildTrack2() => Build(2);
 
+    // ── CI/CD headless entry points (called by GitHub Actions -executeMethod) ─
+    // These save the scene so the WebGL build includes it.
+    public static void BuildTrack0Auto() => BuildHeadless(0);
+    public static void BuildTrack1Auto() => BuildHeadless(1);
+    public static void BuildTrack2Auto() => BuildHeadless(2);
+
+    static void BuildHeadless(int track)
+    {
+        Build(track);
+        // Save the scene so Unity's batch-mode build picks it up
+        UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes();
+        AssetDatabase.SaveAssets();
+        Debug.Log($"[SceneBuilder] Headless build complete for track {track}");
+    }
+
     // ── Master builder ────────────────────────────────────────────────────────
     static void Build(int trackIndex)
     {
